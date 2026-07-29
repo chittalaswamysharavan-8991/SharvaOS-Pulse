@@ -1,0 +1,84 @@
+name: PR CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout pull-request branch
+        uses: actions/checkout@v4
+
+      - name: Detect completed bootstrap
+        id: detect
+        shell: bash
+        run: |
+          if [[ -d .bootstrap ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Import bootstrap must complete before final CI."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node
+        if: steps.detect.outputs.ready == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Verify source provenance
+        if: steps.detect.outputs.ready == 'true'
+        shell: bash
+        run: |
+          grep -F "424f549ad660febe9e2f518736ddfb1e728f87d61654c439d6ede5223807072e" SOURCE_PROVENANCE.md
+          echo "25dbbe927d77520bea38827a43bded750c8cfa6bec38b7059d1f236eeeeea55c  app/page.tsx" | sha256sum -c -
+          echo "ca822bb74d7131dc39b84c0ce1cc3efbff28ecb3422ec36e2f2aefe79ed5f78d  app/globals.css" | sha256sum -c -
+
+      - name: Install
+        if: steps.detect.outputs.ready == 'true'
+        run: npm ci
+
+      - name: Lint
+        if: steps.detect.outputs.ready == 'true'
+        run: npm run lint
+
+      - name: Typecheck
+        if: steps.detect.outputs.ready == 'true'
+        run: npm run typecheck
+
+      - name: Build
+        if: steps.detect.outputs.ready == 'true'
+        run: npm run build
+
+      - name: Test
+        if: steps.detect.outputs.ready == 'true'
+        run: npm test
+
+      - name: Write verification evidence
+        if: always() && steps.detect.outputs.ready == 'true'
+        shell: bash
+        run: |
+          mkdir -p verification
+          {
+            echo "commit=${GITHUB_SHA}"
+            echo "run_id=${GITHUB_RUN_ID}"
+            echo "node=$(node --version)"
+            echo "npm=$(npm --version)"
+            echo "zip_sha256=424f549ad660febe9e2f518736ddfb1e728f87d61654c439d6ede5223807072e"
+          } > verification/ci-evidence.txt
+
+      - name: Upload verification evidence
+        if: always() && steps.detect.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sharvaos-pulse-pr-ci-evidence
+          path: verification/ci-evidence.txt
