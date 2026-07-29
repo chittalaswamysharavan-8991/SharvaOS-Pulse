@@ -24,14 +24,19 @@ jobs:
         id: detect
         shell: bash
         run: |
-          if [[ -d .bootstrap ]]; then
+          if [[ -d .bootstrap || -f .lock-refresh ]]; then
             echo "required=true" >> "$GITHUB_OUTPUT"
           else
             echo "required=false" >> "$GITHUB_OUTPUT"
           fi
+          if [[ -d .bootstrap ]]; then
+            echo "reconstruct=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "reconstruct=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Reconstruct exact source
-        if: steps.detect.outputs.required == 'true'
+        if: steps.detect.outputs.reconstruct == 'true'
         shell: bash
         run: |
           mkdir -p app
@@ -77,14 +82,14 @@ jobs:
         if: steps.detect.outputs.required == 'true'
         run: npm test
 
-      - name: Commit reconstructed source and lockfile
+      - name: Commit generated baseline files
         if: steps.detect.outputs.required == 'true'
         shell: bash
         run: |
           rm -rf .bootstrap
-          rm -f .github/workflows/bootstrap-lock.yml
+          rm -f .lock-refresh .github/workflows/bootstrap-lock.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "chore: reconstruct exact source and normalized lockfile"
+          git commit -m "chore: refresh exact source baseline and lockfile"
           git push
