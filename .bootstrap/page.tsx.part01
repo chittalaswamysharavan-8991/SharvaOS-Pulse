@@ -1,0 +1,105 @@
+"use client";
+
+import {
+  FormEvent,
+  PointerEvent as ReactPointerEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
+type LogKind = "water" | "smoke" | "food";
+type CardKind = LogKind | "tasks";
+type LogEntry = {
+  id: string;
+  kind: LogKind;
+  label: string;
+  detail: string;
+  amount?: number | null;
+  loggedAt: number;
+};
+type Todo = { id: string; text: string; done: boolean; createdAt: number };
+type DayState = { logs: LogEntry[]; todos: Todo[] };
+
+const EMPTY_DAY: DayState = { logs: [], todos: [] };
+const FOOD_TYPES = ["Breakfast", "Lunch", "Snack", "Dinner"];
+
+function dayKey() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+}
+function currentTime(timestamp = Date.now()) {
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit", hour12: true,
+  }).format(new Date(timestamp));
+}
+function todayLabel() {
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata", weekday: "long", day: "numeric", month: "long",
+  }).format(new Date());
+}
+function uid() {
+  return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+export default function Home() {
+  const [day, setDay] = useState<DayState>(EMPTY_DAY);
+  const [ready, setReady] = useState(false);
+  const [syncState, setSyncState] = useState<"syncing" | "synced" | "offline">("syncing");
+  const [activeCapture, setActiveCapture] = useState<LogKind>("water");
+  const [foodText, setFoodText] = useState("");
+  const [foodType, setFoodType] = useState("Meal");
+  const [todoText, setTodoText] = useState("");
+  const [toast, setToast] = useState("");
+  const [undoEntry, setUndoEntry] = useState<LogEntry | null>(null);
+  const [selectedCard, setSelectedCard] = useState<CardKind | null>(null);
+  const pressTimer = useRef<number | null>(null);
+  const longPressed = useRef(false);
+  const date = dayKey();
+  const storageKey = `sharvaos-daily-pulse:${date}`;
+
+  async function api(body?: Record<string, unknown>) {
+    const response = await fetch(body ? "/api/day" : `/api/day?date=${date}`, body ? {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...body, date }),
+    } : undefined);
+    if (!response.ok) throw new Error("Sync unavailable");
+    return response.json();
+  }
+
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      let cached: DayState = EMPTY_DAY;
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) cached = JSON.parse(raw);
+        if (active && (cached.logs.length || cached.todos.length)) setDay(cached);
+      } catch {}
+      try {
+        const remote = await api();
+        if (!active) return;
+        if (!remote.logs.length && !remote.todos.length && (cached.logs.length || cached.todos.length)) {
+          await api({ action: "import_day", logs: cached.logs, todos: cached.todos });
+          const imported = await api();
+          setDay(imported);
+        } else {
+          setDay(remote);
+        }
+        setSyncState("synced");
+      } catch {
+        if (active) setSyncState("offline");
+      } finally {
+        if (active) setReady(true);
+      }
+    }
+    load();
+    return () => { active = false; };
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (ready) localStorage.setItem(storageKey, JSON.stringify(day));
+  }, [day, ready, storageKey]);

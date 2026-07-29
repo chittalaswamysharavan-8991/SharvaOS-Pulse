@@ -1,0 +1,27 @@
+              <button key={kind} role="tab" aria-selected={activeCapture === kind} className={activeCapture === kind ? "active" : ""} onClick={() => setActiveCapture(kind)}>
+                <span>{kind === "water" ? "◒" : kind === "smoke" ? "≋" : "◉"}</span>{kind[0].toUpperCase() + kind.slice(1)}
+              </button>
+            ))}
+          </div>
+          <div className="capture-stage">
+            {activeCapture === "water" && <div className="capture-view water-view"><div className="capture-orb"><span>+</span><div className="orb-wave" /></div><div><h4>Add water</h4><p>Choose the amount you just drank.</p><div className="quick-actions">{[250, 500, 750].map((amount) => <button key={amount} onClick={() => addWater(amount)}>+ {amount} ml</button>)}</div></div></div>}
+            {activeCapture === "smoke" && <div className="capture-view smoke-view"><div className="capture-orb smoke-orb"><span>+</span><div className="smoke-puff puff-one" /><div className="smoke-puff puff-two" /></div><div><h4>Log a smoke</h4><p>One tap. Time is captured automatically.</p><button className="primary-action smoke-action" onClick={addSmoke}>Log smoke now</button></div></div>}
+            {activeCapture === "food" && <form className="food-form" onSubmit={addFood}><div><h4>Log food</h4><p>Simple is enough — “rice + aloo curry” works.</p></div><div className="food-types">{FOOD_TYPES.map((type) => <button type="button" key={type} className={foodType === type ? "active" : ""} onClick={() => setFoodType(type)}>{type}</button>)}</div><div className="input-row"><input value={foodText} onChange={(e) => setFoodText(e.target.value)} placeholder="What did you eat?" /><button type="submit">Add</button></div></form>}
+          </div>
+        </section>
+
+        <section className="panel todo-panel">
+          <div className="panel-heading"><div><p className="eyebrow">TODAY&apos;S FOCUS</p><h3>Small list. Clear day.</h3></div><span className="task-count">{day.todos.length}</span></div>
+          <form className="todo-form" onSubmit={addTodo}><input value={todoText} onChange={(e) => setTodoText(e.target.value)} placeholder="Add one clear next action…" /><button type="submit">+</button></form>
+          <div className="todo-list">
+            {!day.todos.length && <div className="empty-state"><span>↗</span><p><strong>Nothing queued yet.</strong>Add the one thing that matters now.</p></div>}
+            {day.todos.map((todo, index) => <div className={`todo-item ${todo.done ? "done" : ""}`} key={todo.id} style={{ "--delay": `${index * 45}ms` } as React.CSSProperties}><button className="check" onClick={() => toggleTodo(todo.id)}>{todo.done ? "✓" : ""}</button><span>{todo.text}</span><button className="remove" onClick={() => removeTodo(todo.id)}>×</button></div>)}
+          </div>
+          {!!day.todos.length && <div className="todo-footer"><div><i style={{ width: `${progress}%` }} /></div><span>{completedTodos} complete</span></div>}
+        </section>
+      </div>
+
+      <section className="panel timeline-panel">
+        <div className="panel-heading"><div><p className="eyebrow">TODAY&apos;S TRACE</p><h3>Your day, as it happened.</h3></div><span className="timeline-total">{day.logs.length} entries</span></div>
+        <div className="timeline">
+          {!day.logs.length && <div className="empty-timeline"><span className="pulse-ring" /><p>Your first capture will appear here.</p></div>}

@@ -1,0 +1,55 @@
+  function cancelPress() {
+    if (pressTimer.current) window.clearTimeout(pressTimer.current);
+  }
+  function recent(kind: LogKind) {
+    return day.logs.filter((x) => x.kind === kind).slice(0, 4);
+  }
+
+  const cards: { kind: CardKind; icon: string; title: string; value: string }[] = [
+    { kind: "water", icon: "◒", title: "Water", value: `${water.toLocaleString("en-IN")} ml` },
+    { kind: "smoke", icon: "≋", title: "Smoke", value: `${smoke} ${smoke === 1 ? "entry" : "entries"}` },
+    { kind: "food", icon: "◉", title: "Food", value: `${meals} ${meals === 1 ? "meal" : "meals"}` },
+    { kind: "tasks", icon: "✓", title: "Today's tasks", value: `${completedTodos}/${day.todos.length} done` },
+  ];
+
+  return (
+    <main className="app-shell">
+      <div className="ambient ambient-one" /><div className="ambient ambient-two" />
+      <header className="topbar">
+        <div className="brand"><div className="brand-mark">S</div><div><p className="eyebrow">SHARVAOS</p><h1>Daily Pulse</h1></div></div>
+        <div className="day-status"><span className={`status-dot ${syncState}`} /><div><strong>{syncState === "synced" ? "Synced" : syncState === "syncing" ? "Syncing…" : "Device mode"}</strong><span>{ready ? todayLabel() : "Loading today…"}</span></div></div>
+      </header>
+
+      <section className="hero">
+        <div><p className="hero-kicker">TODAY · HUMAN MODE</p><h2>Namaskaram, Sharva.<span>Let&apos;s keep today clear.</span></h2></div>
+        <div className="local-note"><span>⌁</span><p><strong>Press & hold any card</strong>See totals, recent entries and quick actions.</p></div>
+      </section>
+
+      <section className="metric-grid" aria-label="Today summary">
+        {cards.map((card) => (
+          <button
+            key={card.kind}
+            className={`metric-card ${card.kind === "tasks" ? "task" : card.kind}-card`}
+            onPointerDown={() => startPress(card.kind)}
+            onPointerUp={(event) => endPress(card.kind, event)}
+            onPointerCancel={cancelPress}
+            onPointerLeave={cancelPress}
+            onContextMenu={(event) => event.preventDefault()}
+            onClick={() => { if (!longPressed.current) setSelectedCard(card.kind); }}
+            aria-label={`Open ${card.title} details`}
+          >
+            <div className="metric-icon">{card.icon}</div>
+            <div className="metric-copy"><span>{card.title}</span><strong>{card.value}</strong></div>
+            {card.kind === "water" && <div className="mini-progress"><i style={{ width: `${Math.min(water / 25, 100)}%` }} /></div>}
+            {card.kind === "smoke" && <div className="metric-signal"><i /><i /><i /></div>}
+            {card.kind === "food" && <span className="metric-foot">hold for history</span>}
+            {card.kind === "tasks" && <div className="progress-ring" style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><b>{progress}%</b></div>}
+          </button>
+        ))}
+      </section>
+
+      <div className="content-grid">
+        <section className="panel capture-panel">
+          <div className="panel-heading"><div><p className="eyebrow">QUICK CAPTURE</p><h3>What happened?</h3></div><span className="live-pill"><i /> ready</span></div>
+          <div className="capture-tabs" role="tablist">
+            {(["water", "smoke", "food"] as LogKind[]).map((kind) => (
