@@ -1,0 +1,90 @@
+name: Import bootstrap
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout pull-request branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          persist-credentials: true
+
+      - name: Detect bootstrap payload
+        id: detect
+        shell: bash
+        run: |
+          if [[ -d .bootstrap ]]; then
+            echo "required=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "required=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Reconstruct exact source
+        if: steps.detect.outputs.required == 'true'
+        shell: bash
+        run: |
+          mkdir -p app
+          cat .bootstrap/page.tsx.part* > app/page.tsx
+          cat .bootstrap/globals.css.part* > app/globals.css
+          echo "25dbbe927d77520bea38827a43bded750c8cfa6bec38b7059d1f236eeeeea55c  app/page.tsx" | sha256sum -c -
+          echo "ca822bb74d7131dc39b84c0ce1cc3efbff28ecb3422ec36e2f2aefe79ed5f78d  app/globals.css" | sha256sum -c -
+
+      - name: Set up Node
+        if: steps.detect.outputs.required == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+
+      - name: Generate normalized lockfile
+        if: steps.detect.outputs.required == 'true'
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Verify normalized version
+        if: steps.detect.outputs.required == 'true'
+        shell: bash
+        run: |
+          node -e "const p=require('./package.json'); const l=require('./package-lock.json'); if (p.version !== '2.0.0' || l.version !== '2.0.0' || l.packages[''].version !== '2.0.0') process.exit(1)"
+
+      - name: Install
+        if: steps.detect.outputs.required == 'true'
+        run: npm ci
+
+      - name: Lint
+        if: steps.detect.outputs.required == 'true'
+        run: npm run lint
+
+      - name: Typecheck
+        if: steps.detect.outputs.required == 'true'
+        run: npm run typecheck
+
+      - name: Build
+        if: steps.detect.outputs.required == 'true'
+        run: npm run build
+
+      - name: Test
+        if: steps.detect.outputs.required == 'true'
+        run: npm test
+
+      - name: Commit reconstructed source and lockfile
+        if: steps.detect.outputs.required == 'true'
+        shell: bash
+        run: |
+          rm -rf .bootstrap
+          rm -f .github/workflows/bootstrap-lock.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: reconstruct exact source and normalized lockfile"
+          git push
