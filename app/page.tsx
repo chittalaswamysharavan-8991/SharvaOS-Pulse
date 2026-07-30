@@ -14,6 +14,13 @@ import {
   applyPendingOperations,
   parsePendingOperations,
 } from "../lib/pulse-reliability.mjs";
+import { createPulseAuthClient } from "../lib/pulse-auth-client.mjs";
+import { createPulseCanonicalClient } from "../lib/pulse-canonical-client.mjs";
+import { loadPulseRuntimeConfig } from "../lib/pulse-runtime-config.mjs";
+import {
+  createCanonicalPulseTransport,
+  createD1PulseTransport,
+} from "../lib/pulse-transport.mjs";
 
 type LogKind = "water" | "smoke" | "food";
 type CardKind = LogKind | "tasks";
@@ -32,13 +39,9 @@ type PendingOperation = {
   body: Record<string, unknown>;
   createdAt: number;
 };
-type DayResponse = {
-  ok?: boolean;
-  logs?: LogEntry[];
-  todos?: Todo[];
-  day?: DayState;
-  error?: string;
-};
+type AuthPhase = "loading" | "d1" | "required" | "sending" | "verify" | "signed-in";
+type PulseTransport = ReturnType<typeof createD1PulseTransport>;
+type PulseAuthClient = ReturnType<typeof createPulseAuthClient>;
 
 const EMPTY_DAY: DayState = { logs: [], todos: [] };
 const FOOD_TYPES = ["Breakfast", "Lunch", "Snack", "Dinner"];
@@ -61,27 +64,25 @@ function todayLabel() {
 function uid() {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
-
-class SyncError extends Error {
-  constructor(message: string, readonly status: number) {
-    super(message);
-  }
+function errorStatus(error: unknown) {
+  if (!error || typeof error !== "object" || !("status" in error)) return 0;
+  return Number((error as { status?: unknown }).status) || 0;
 }
-
-async function requestDay(date: string, body?: Record<string, unknown>): Promise<DayResponse> {
-  const response = await fetch(body ? "/api/day" : `/api/day?date=${date}`, body ? {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...body, date }),
-  } : undefined);
-  const payload = await response.json().catch(() => ({ error: "Sync unavailable" })) as DayResponse;
-  if (!response.ok) throw new SyncError(payload.error || "Sync unavailable", response.status);
-  return payload;
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 export default function Home() {
   const [day, setDay] = useState<DayState>(EMPTY_DAY);
   const [ready, setReady] = useState(false);
+  const [runtimeReady, setRuntimeReady] = useState(false);
+  const [transportVersion, setTransportVersion] = useState(0);
+  const [dataOwner, setDataOwner] = useState<"d1" | "supabase">("d1");
+  const [runtimeNotice, setRuntimeNotice] = useState("");
+  const [authPhase, setAuthPhase] = useState<AuthPhase>("loading");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authCode, setAuthCode] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
   const [syncState, setSyncState] = useState<"syncing" | "synced" | "offline">("syncing");
   const [activeCapture, setActiveCapture] = useState<LogKind>("water");
   const [foodText, setFoodText] = useState("");
@@ -94,6 +95,9 @@ export default function Home() {
   const longPressed = useRef(false);
   const pendingRef = useRef<PendingOperation[]>([]);
   const flushInFlight = useRef(false);
+  const transportRef = useRef<PulseTransport | null>(null);
+  const canonicalTransportRef = useRef<PulseTransport | null>(null);
+  const authClientRef = useRef<PulseAuthClient | null>(null);
   const date = dayKey();
   const storageKey = `sharvaos-daily-pulse:${date}`;
   const pendingKey = `${storageKey}:pending`;
@@ -103,29 +107,39 @@ export default function Home() {
     localStorage.setItem(pendingKey, JSON.stringify(operations));
   }, [pendingKey]);
 
+  const requireSignIn = useCallback((message = "Your Supabase session expired. Sign in to continue syncing.") => {
+    authClientRef.current?.clearSession();
+    transportRef.current = null;
+    setAuthPhase("required");
+    setAuthMessage(message);
+    setSyncState("offline");
+  }, []);
+
   const flushPending = useCallback(async () => {
-    if (flushInFlight.current || !pendingRef.current.length) return;
+    const transport = transportRef.current;
+    if (!transport || flushInFlight.current || !pendingRef.current.length) return;
     flushInFlight.current = true;
     setSyncState("syncing");
     try {
       while (pendingRef.current.length) {
         const operation = pendingRef.current[0];
         try {
-          const result = await requestDay(date, operation.body);
+          const remoteDay = await transport.mutate(date, operation.body, operation.queueId) as DayState;
           const remaining = pendingRef.current.filter((item) => item.queueId !== operation.queueId);
           savePending(remaining);
-          if (result.day) {
-            setDay(applyPendingOperations(result.day, remaining) as DayState);
-          }
+          setDay(applyPendingOperations(remoteDay, remaining) as DayState);
         } catch (error) {
-          if (error instanceof SyncError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+          const status = errorStatus(error);
+          if (transport.owner === "supabase" && status === 401) {
+            requireSignIn();
+            return;
+          }
+          if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
             const remaining = pendingRef.current.filter((item) => item.queueId !== operation.queueId);
             savePending(remaining);
-            setToast(error.message);
-            const remote = await requestDay(date);
-            if (remote.logs && remote.todos) {
-              setDay(applyPendingOperations(remote as DayState, remaining) as DayState);
-            }
+            setToast(errorMessage(error, "The rejected change was removed from the sync queue"));
+            const remote = await transport.readDay(date) as DayState;
+            setDay(applyPendingOperations(remote, remaining) as DayState);
             continue;
           }
           throw error;
@@ -138,13 +152,73 @@ export default function Home() {
     } finally {
       flushInFlight.current = false;
     }
-  }, [date, savePending]);
+  }, [date, requireSignIn, savePending]);
 
   useEffect(() => {
+    let active = true;
+    async function initializeRuntime() {
+      try {
+        const config = await loadPulseRuntimeConfig();
+        if (!active) return;
+        if (config.dataOwner === "d1") {
+          transportRef.current = createD1PulseTransport();
+          setDataOwner("d1");
+          setAuthPhase("d1");
+          setRuntimeNotice(config.requestedOwner === "supabase" ? config.reason : "");
+          setRuntimeReady(true);
+          setTransportVersion((value) => value + 1);
+          return;
+        }
+
+        const auth = createPulseAuthClient({
+          projectUrl: config.supabase.projectUrl,
+          publishableKey: config.supabase.publishableKey,
+        });
+        const canonical = createCanonicalPulseTransport({
+          client: createPulseCanonicalClient({
+            functionUrl: config.supabase.functionUrl,
+            publishableKey: config.supabase.publishableKey,
+            getAccessToken: () => auth.getAccessToken(),
+          }),
+        }) as PulseTransport;
+        authClientRef.current = auth;
+        canonicalTransportRef.current = canonical;
+        setDataOwner("supabase");
+        setRuntimeNotice("");
+        const session = await auth.restoreSession().catch(() => null);
+        if (!active) return;
+        if (session) {
+          transportRef.current = canonical;
+          setAuthPhase("signed-in");
+          setTransportVersion((value) => value + 1);
+        } else {
+          transportRef.current = null;
+          setAuthPhase("required");
+        }
+        setRuntimeReady(true);
+      } catch (error) {
+        if (!active) return;
+        transportRef.current = createD1PulseTransport();
+        setDataOwner("d1");
+        setAuthPhase("d1");
+        setRuntimeNotice(`Supabase configuration check failed; D1 rollback is active. ${errorMessage(error, "")}`.trim());
+        setRuntimeReady(true);
+        setTransportVersion((value) => value + 1);
+      }
+    }
+    void initializeRuntime();
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const transport = transportRef.current;
+    if (!runtimeReady || !transport) return;
     let active = true;
     async function load() {
       let cached: DayState = EMPTY_DAY;
       let pending: PendingOperation[] = [];
+      setReady(false);
+      setSyncState("syncing");
       try {
         const raw = localStorage.getItem(storageKey);
         if (raw) cached = JSON.parse(raw) as DayState;
@@ -153,25 +227,28 @@ export default function Home() {
         if (active && (cached.logs.length || cached.todos.length)) setDay(cached);
       } catch {}
       try {
-        const remote = await requestDay(date);
-        if (!active || !remote.logs || !remote.todos) return;
-        let nextDay = applyPendingOperations(remote as DayState, pending) as DayState;
+        const remote = await transport.readDay(date) as DayState;
+        if (!active) return;
+        let nextDay = applyPendingOperations(remote, pending) as DayState;
         if (!pending.length && !remote.logs.length && !remote.todos.length && (cached.logs.length || cached.todos.length)) {
-          const imported = await requestDay(date, { action: "import_day", logs: cached.logs, todos: cached.todos });
-          nextDay = imported.day ?? nextDay;
+          nextDay = await transport.importDay(date, cached, `device-initial:${date}`) as DayState;
         }
         setDay(nextDay);
         if (pending.length) await flushPending();
         else setSyncState("synced");
-      } catch {
-        if (active) setSyncState("offline");
+      } catch (error) {
+        if (transport.owner === "supabase" && errorStatus(error) === 401) {
+          requireSignIn();
+        } else if (active) {
+          setSyncState("offline");
+        }
       } finally {
         if (active) setReady(true);
       }
     }
     void load();
     return () => { active = false; };
-  }, [date, flushPending, pendingKey, storageKey]);
+  }, [date, flushPending, pendingKey, requireSignIn, runtimeReady, storageKey, transportVersion]);
 
   useEffect(() => {
     function retry() { void flushPending(); }
@@ -194,6 +271,54 @@ export default function Home() {
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, []);
+
+  async function requestOtp(event: FormEvent) {
+    event.preventDefault();
+    const auth = authClientRef.current;
+    if (!auth) return;
+    setAuthPhase("sending");
+    setAuthMessage("");
+    try {
+      const result = await auth.requestOtp(authEmail);
+      setAuthEmail(result.email);
+      setAuthCode("");
+      setAuthPhase("verify");
+      setAuthMessage("A 6-digit sign-in code was sent to your registered email.");
+    } catch (error) {
+      setAuthPhase("required");
+      setAuthMessage(errorMessage(error, "Could not send sign-in code"));
+    }
+  }
+
+  async function verifyOtp(event: FormEvent) {
+    event.preventDefault();
+    const auth = authClientRef.current;
+    const canonical = canonicalTransportRef.current;
+    if (!auth || !canonical) return;
+    setAuthPhase("sending");
+    setAuthMessage("");
+    try {
+      await auth.verifyOtp({ email: authEmail, token: authCode });
+      transportRef.current = canonical;
+      setAuthPhase("signed-in");
+      setAuthMessage("");
+      setReady(false);
+      setSyncState("syncing");
+      setTransportVersion((value) => value + 1);
+    } catch (error) {
+      setAuthPhase("verify");
+      setAuthMessage(errorMessage(error, "Code verification failed"));
+    }
+  }
+
+  async function signOut() {
+    await authClientRef.current?.signOut();
+    transportRef.current = null;
+    setAuthCode("");
+    setAuthPhase("required");
+    setAuthMessage("Signed out. Device cache and pending changes remain on this device.");
+    setSyncState("offline");
+  }
 
   const water = useMemo(() => day.logs.filter((x) => x.kind === "water")
     .reduce((sum, x) => sum + (x.amount ?? 0), 0), [day.logs]);
@@ -278,17 +403,84 @@ export default function Home() {
     { kind: "tasks", icon: "✓", title: "Today's tasks", value: `${completedTodos}/${day.todos.length} done` },
   ];
 
+  if (!runtimeReady) {
+    return (
+      <main className="app-shell" style={{ display: "grid", minHeight: "100vh", placeItems: "center" }}>
+        <section className="panel" style={{ maxWidth: 480, width: "100%" }}>
+          <p className="eyebrow">SHARVAOS PULSE</p><h2>Checking canonical runtime…</h2>
+          <p style={{ color: "var(--muted)" }}>Your device cache stays available while the data-owner contract is verified.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (dataOwner === "supabase" && authPhase !== "signed-in") {
+    const verifying = authPhase === "verify";
+    const busy = authPhase === "sending";
+    return (
+      <main className="app-shell" style={{ display: "grid", minHeight: "100vh", placeItems: "center" }}>
+        <div className="ambient ambient-one" /><div className="ambient ambient-two" />
+        <section className="panel" style={{ maxWidth: 520, width: "100%", position: "relative", zIndex: 1 }}>
+          <div className="brand" style={{ marginBottom: 28 }}><div className="brand-mark">S</div><div><p className="eyebrow">SUPABASE CANONICAL</p><h1 style={{ margin: 0 }}>Daily Pulse</h1></div></div>
+          <h2>{verifying ? "Enter your sign-in code" : "Sign in to your private Pulse"}</h2>
+          <p style={{ color: "var(--muted)", lineHeight: 1.6 }}>
+            {verifying ? "Use the six-digit code sent to the registered owner email." : "Only the existing confirmed owner account can sign in. New accounts are never created from this screen."}
+          </p>
+          <form onSubmit={verifying ? verifyOtp : requestOtp} style={{ display: "grid", gap: 12, marginTop: 24 }}>
+            <input
+              aria-label="Owner email"
+              autoComplete="email"
+              disabled={verifying || busy}
+              inputMode="email"
+              onChange={(event) => setAuthEmail(event.target.value)}
+              placeholder="Registered owner email"
+              required
+              style={{ background: "rgba(0,0,0,.28)", border: "1px solid var(--line)", borderRadius: 14, color: "var(--ink)", minHeight: 50, padding: "0 15px" }}
+              type="email"
+              value={authEmail}
+            />
+            {verifying && <input
+              aria-label="Six-digit code"
+              autoComplete="one-time-code"
+              autoFocus
+              inputMode="numeric"
+              maxLength={6}
+              onChange={(event) => setAuthCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+              pattern="[0-9]{6}"
+              placeholder="6-digit code"
+              required
+              style={{ background: "rgba(0,0,0,.28)", border: "1px solid var(--line)", borderRadius: 14, color: "var(--ink)", fontSize: 22, letterSpacing: 8, minHeight: 54, padding: "0 15px" }}
+              value={authCode}
+            />}
+            <button
+              className="primary-action"
+              disabled={busy || (verifying ? authCode.length !== 6 : !authEmail.trim())}
+              style={{ border: 0, borderRadius: 14, cursor: "pointer", minHeight: 50 }}
+              type="submit"
+            >{busy ? "Please wait…" : verifying ? "Verify and sync" : "Send sign-in code"}</button>
+          </form>
+          {verifying && <button onClick={() => { setAuthPhase("required"); setAuthCode(""); setAuthMessage(""); }} style={{ background: "transparent", border: 0, color: "var(--muted)", cursor: "pointer", marginTop: 14 }} type="button">Use another email</button>}
+          {authMessage && <p role="status" style={{ color: "var(--acid)", marginTop: 18 }}>{authMessage}</p>}
+          <p style={{ borderTop: "1px solid var(--line)", color: "var(--muted)", fontSize: 13, marginTop: 28, paddingTop: 18 }}>Offline entries and queued changes remain on this device until authentication succeeds.</p>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="app-shell">
       <div className="ambient ambient-one" /><div className="ambient ambient-two" />
       <header className="topbar">
         <div className="brand"><div className="brand-mark">S</div><div><p className="eyebrow">SHARVAOS</p><h1>Daily Pulse</h1></div></div>
-        <div className="day-status"><span className={`status-dot ${syncState}`} /><div><strong>{syncState === "synced" ? "Synced" : syncState === "syncing" ? "Syncing…" : "Device mode"}</strong><span>{ready ? todayLabel() : "Loading today…"}</span></div></div>
+        <div style={{ alignItems: "center", display: "flex", gap: 12 }}>
+          <div className="day-status"><span className={`status-dot ${syncState}`} /><div><strong>{syncState === "synced" ? "Synced" : syncState === "syncing" ? "Syncing…" : "Device mode"}</strong><span>{ready ? `${todayLabel()} · ${dataOwner === "supabase" ? "Supabase" : "D1 fallback"}` : "Loading today…"}</span></div></div>
+          {dataOwner === "supabase" && <button onClick={() => void signOut()} style={{ background: "transparent", border: "1px solid var(--line)", borderRadius: 999, color: "var(--muted)", cursor: "pointer", padding: "8px 12px" }} type="button">Sign out</button>}
+        </div>
       </header>
 
       <section className="hero">
         <div><p className="hero-kicker">TODAY · HUMAN MODE</p><h2>Namaskaram, Sharva.<span>Let&apos;s keep today clear.</span></h2></div>
-        <div className="local-note"><span>⌁</span><p><strong>Press & hold any card</strong>See totals, recent entries and quick actions.</p></div>
+        <div className="local-note"><span>⌁</span><p><strong>{runtimeNotice ? "Rollback active" : "Press & hold any card"}</strong>{runtimeNotice || "See totals, recent entries and quick actions."}</p></div>
       </section>
 
       <section className="metric-grid" aria-label="Today summary">
@@ -350,7 +542,7 @@ export default function Home() {
         </div>
       </section>
 
-      <footer><span>SharvaOS · Daily Pulse</span><p>Live naturally. Capture carefully.</p><span>{syncState === "synced" ? "D1 cloud sync" : "Offline cache"}</span></footer>
+      <footer><span>SharvaOS · Daily Pulse</span><p>Live naturally. Capture carefully.</p><span>{syncState === "synced" ? (dataOwner === "supabase" ? "Supabase canonical" : "D1 rollback") : "Offline cache"}</span></footer>
 
       {selectedCard && <div className="sheet-backdrop" onPointerDown={() => setSelectedCard(null)}>
         <section className={`detail-sheet ${selectedCard}`} role="dialog" aria-modal="true" aria-label={`${selectedCard} details`} onPointerDown={(e) => e.stopPropagation()}>
