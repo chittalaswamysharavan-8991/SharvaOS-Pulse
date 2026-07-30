@@ -11,6 +11,7 @@ export class PulseTransportError extends Error {
   code?: string;
 }
 
+export function selectMissingDayEntries(localDay: PulseDay, remoteDay: PulseDay): PulseDay;
 export function createD1PulseTransport(input?: { fetchImpl?: typeof fetch }): PulseTransport;
 export function createCanonicalPulseTransport(input: { client: {
   readDay(date: string): Promise<unknown>;
