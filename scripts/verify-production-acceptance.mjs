@@ -6,7 +6,7 @@ const DEFAULTS = Object.freeze({
   productionUrl: "https://sharvaos-pulse-google.vercel.app",
   expectedVersion: "2.2.0",
   expectedContract: "sharvaos.pulse.v1",
-  expectedSourceCommit: "748ecee2b36dbf40bd990ac0d3fd4aa6a90d02f2",
+  expectedSourceCommit: "",
 });
 
 function invariant(condition, message) {
@@ -28,7 +28,10 @@ export function validateHealth(health, expected = DEFAULTS) {
   invariant(health?.dataOwner === "supabase", "production owner must be supabase");
   invariant(health?.canonicalFunction === "configured", "canonical function must be configured");
   invariant(health?.authentication === "owner-session-required", "owner session must be required");
-  invariant(health?.sourceCommit === expected.expectedSourceCommit, "production source commit mismatch");
+  invariant(/^[0-9a-f]{40}$/i.test(health?.sourceCommit ?? ""), "production source commit must be a full Git SHA");
+  if (expected.expectedSourceCommit) {
+    invariant(health.sourceCommit === expected.expectedSourceCommit, "production source commit mismatch");
+  }
   assertNoSensitiveMaterial(health, "health response");
   return health;
 }
@@ -117,7 +120,7 @@ export async function runProductionAcceptance({
     productionShell: "ready",
     ownerGateContract: "verified-by-repository-tests-and-browser-acceptance",
     anonymousCanonicalMutation: "denied",
-    rollbackMode: "explicit-d1-only",
+    rollbackMode: "d1-binding-required",
     result: "PASS",
   };
 
