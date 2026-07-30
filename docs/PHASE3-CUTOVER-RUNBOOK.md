@@ -12,6 +12,20 @@ Confirm:
 - exactly one confirmed owner email account exists;
 - no service-role key or user token is present in GitHub, deployment files or chat messages.
 
+## Fail-closed configuration proof
+
+Before adding backend credentials, deploy once with `SHARVAOS_PULSE_DATA_OWNER` missing or invalid.
+
+Confirm:
+
+- `/api/runtime-config` reports `dataOwner: blocked`;
+- the UI reports `Sync blocked`;
+- cached daily state remains visible;
+- new captures remain queued on the device;
+- neither the Supabase Edge Function nor `/api/day` receives a write.
+
+D1 must never activate merely because Supabase configuration is incomplete or unavailable.
+
 ## Staging configuration
 
 Set the following as deployment environment variables, never source files:
@@ -43,6 +57,23 @@ Deploy to a staging/preview target first.
 12. Confirm database canary/test rows are removed.
 
 Do not copy the OTP, access token or refresh token into evidence.
+
+## Device-cache migration proof
+
+Use a staging browser profile with:
+
+- at least one cached smoke, food or task entry;
+- canonical Supabase already containing a water record for the same day;
+- optionally one pending queued operation.
+
+Confirm:
+
+1. pending operations sync first;
+2. the UI re-reads canonical state;
+3. missing cached entries import even though canonical water already exists;
+4. matching IDs or deterministic fingerprints do not duplicate;
+5. a dataset larger than 100 entries is split into bounded batches;
+6. the pending queue becomes empty and the final read-back contains every expected entry once.
 
 ## Offline proof
 
