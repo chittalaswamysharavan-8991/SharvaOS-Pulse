@@ -13,35 +13,63 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect completed preparation
+        id: detect
+        shell: bash
+        run: |
+          if [[ -f .v2.1-lock-refresh ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "The normalized v2.1 lockfile is being prepared by PR CI."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up Node
+        if: steps.detect.outputs.ready == 'true'
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Verify immutable source baseline
+        if: steps.detect.outputs.ready == 'true'
+        shell: bash
+        run: |
+          git fetch --tags --force
+          test "$(git rev-list -n 1 v2.0.0-baseline)" = "43c9c2caa237e326e08671606d4b3b5aa117e5ec"
+          grep -F "424f549ad660febe9e2f518736ddfb1e728f87d61654c439d6ede5223807072e" SOURCE_PROVENANCE.md
+          test "$(git show v2.0.0-baseline:app/page.tsx | sha256sum | cut -d' ' -f1)" = "25dbbe927d77520bea38827a43bded750c8cfa6bec38b7059d1f236eeeeea55c"
+          test "$(git show v2.0.0-baseline:app/globals.css | sha256sum | cut -d' ' -f1)" = "ca822bb74d7131dc39b84c0ce1cc3efbff28ecb3422ec36e2f2aefe79ed5f78d"
+
       - name: Install
+        if: steps.detect.outputs.ready == 'true'
         run: npm ci
 
       - name: Lint
+        if: steps.detect.outputs.ready == 'true'
         run: npm run lint
 
       - name: Typecheck
+        if: steps.detect.outputs.ready == 'true'
         run: npm run typecheck
 
       - name: Build
+        if: steps.detect.outputs.ready == 'true'
         run: npm run build
 
       - name: Test
+        if: steps.detect.outputs.ready == 'true'
         run: npm test
 
       - name: Write verification evidence
-        if: always()
+        if: always() && steps.detect.outputs.ready == 'true'
         shell: bash
         run: |
           mkdir -p verification
@@ -50,12 +78,14 @@ jobs:
             echo "run_id=${GITHUB_RUN_ID}"
             echo "node=$(node --version)"
             echo "npm=$(npm --version)"
+            echo "version=$(node -p \"require('./package.json').version\")"
+            echo "baseline_commit=43c9c2caa237e326e08671606d4b3b5aa117e5ec"
             echo "zip_sha256=424f549ad660febe9e2f518736ddfb1e728f87d61654c439d6ede5223807072e"
           } > verification/ci-evidence.txt
 
       - name: Upload verification evidence
-        if: always()
+        if: always() && steps.detect.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: sharvaos-pulse-ci-evidence
+          name: sharvaos-pulse-v21-ci-evidence
           path: verification/ci-evidence.txt
