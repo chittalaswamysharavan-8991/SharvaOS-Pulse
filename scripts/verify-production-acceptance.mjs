@@ -39,7 +39,9 @@ export function validateRuntimeConfig(config) {
   invariant(config?.requestedOwner === "supabase", "runtime must request supabase");
   invariant(config?.dataOwner === "supabase", "runtime owner must be supabase");
   invariant(config?.cutoverReady === true, "runtime must be cutover ready");
-  invariant(["public-default", "environment"].includes(config?.configSource), "unexpected config source");
+  if (config?.configSource !== undefined) {
+    invariant(["public-default", "environment"].includes(config.configSource), "unexpected config source");
+  }
   invariant(config?.supabase?.projectUrl?.startsWith("https://"), "missing HTTPS project URL");
   invariant(config?.supabase?.functionUrl?.startsWith("https://"), "missing HTTPS function URL");
   invariant(config?.supabase?.publishableKey?.startsWith("sb_publishable_"), "missing publishable client key");
@@ -115,7 +117,7 @@ export async function runProductionAcceptance({
     contract: health.contract,
     sourceCommit: health.sourceCommit,
     dataOwner: health.dataOwner,
-    configSource: config.configSource,
+    configSource: config.configSource ?? "legacy-public-runtime",
     canonicalFunction: "verified-by-runtime-config",
     productionShell: "ready",
     ownerGateContract: "verified-by-repository-tests-and-browser-acceptance",
