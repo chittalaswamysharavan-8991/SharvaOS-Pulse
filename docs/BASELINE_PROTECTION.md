@@ -3,9 +3,11 @@
 ## Frozen baseline
 
 - Release/tag: `v2.0.0-baseline`
+- Release URL: `https://github.com/chittalaswamysharavan-8991/SharvaOS-Pulse/releases/tag/v2.0.0-baseline`
 - Commit: `43c9c2caa237e326e08671606d4b3b5aa117e5ec`
 - Source archive SHA-256: `424f549ad660febe9e2f518736ddfb1e728f87d61654c439d6ede5223807072e`
 - Baseline verification: install → lint → typecheck → build → test
+- Freeze evidence: GitHub Actions run `30502073192`
 
 The tag must always resolve to the commit above. Do not retag or overwrite the release. Future source checks read the original UI hashes from the frozen tag rather than requiring current product files to remain unchanged.
 
@@ -22,7 +24,13 @@ Every product or infrastructure change must use a branch and pull request. The i
 
 This repository is owned by one person, so the rule intentionally uses zero required approving reviews. CI and unresolved review conversations remain mandatory gates.
 
-If automated protection setup is denied by GitHub, keep the generated P0 issue open and follow this PR-only policy manually until an owner applies the rule in repository settings.
+## Current enforcement status
+
+GitHub accepted the release creation but denied the Actions token access to the branch-protection administration endpoint with HTTP 403. P0 Issue #4 records the unresolved account-level control:
+
+`https://github.com/chittalaswamysharavan-8991/SharvaOS-Pulse/issues/4`
+
+Until an owner applies the rule in repository settings, follow the PR-only policy manually and do not push product changes directly to `main`.
 
 ## Rollback
 
