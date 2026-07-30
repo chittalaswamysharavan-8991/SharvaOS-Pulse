@@ -5,6 +5,9 @@ on:
     paths:
       - "scripts/verify-production-acceptance.mjs"
       - "tests/phase5-production-acceptance.test.mjs"
+      - "tests/phase5-rollback-safety.test.mjs"
+      - "lib/pulse-public-runtime.mjs"
+      - "app/api/health/route.ts"
       - "docs/PHASE5-PRODUCTION-ACCEPTANCE.md"
       - "docs/GOOGLE-AUTH-CUTOVER.md"
       - "docs/GOOGLE-AUTH-EVIDENCE.md"
@@ -15,6 +18,9 @@ on:
     paths:
       - "scripts/verify-production-acceptance.mjs"
       - "tests/phase5-production-acceptance.test.mjs"
+      - "tests/phase5-rollback-safety.test.mjs"
+      - "lib/pulse-public-runtime.mjs"
+      - "app/api/health/route.ts"
       - "docs/PHASE5-PRODUCTION-ACCEPTANCE.md"
       - "docs/GOOGLE-AUTH-CUTOVER.md"
       - "docs/GOOGLE-AUTH-EVIDENCE.md"
@@ -35,6 +41,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -46,8 +54,13 @@ jobs:
           SHARVAOS_PULSE_PRODUCTION_URL: https://sharvaos-pulse-google.vercel.app
           EXPECTED_VERSION: 2.2.0
           EXPECTED_CONTRACT: sharvaos.pulse.v1
-          EXPECTED_SOURCE_COMMIT: 748ecee2b36dbf40bd990ac0d3fd4aa6a90d02f2
         run: node scripts/verify-production-acceptance.mjs
+
+      - name: Verify deployed source belongs to main
+        run: |
+          DEPLOYED_COMMIT="$(node -e 'console.log(JSON.parse(require("fs").readFileSync("verification/phase5-production-acceptance.json", "utf8")).sourceCommit)')"
+          git cat-file -e "${DEPLOYED_COMMIT}^{commit}"
+          git merge-base --is-ancestor "$DEPLOYED_COMMIT" origin/main
 
       - name: Upload acceptance evidence
         uses: actions/upload-artifact@v4
