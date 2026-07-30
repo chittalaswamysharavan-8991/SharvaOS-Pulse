@@ -179,7 +179,7 @@ jobs:
           );
 
           for (const expected of [
-            'dataOwner: "blocked"',
+            'config.dataOwner === "blocked"',
             'setDataOwner("unavailable")',
             'const configuredTransport = transportRef.current;',
             'const missingAfterQueue = selectMissingDayEntries(cached, confirmed)',
