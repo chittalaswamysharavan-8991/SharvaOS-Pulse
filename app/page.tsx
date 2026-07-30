@@ -213,6 +213,7 @@ export default function Home() {
   useEffect(() => {
     const transport = transportRef.current;
     if (!runtimeReady || !transport) return;
+    const activeTransport = transport;
     let active = true;
     async function load() {
       let cached: DayState = EMPTY_DAY;
@@ -227,17 +228,17 @@ export default function Home() {
         if (active && (cached.logs.length || cached.todos.length)) setDay(cached);
       } catch {}
       try {
-        const remote = await transport.readDay(date) as DayState;
+        const remote = await activeTransport.readDay(date) as DayState;
         if (!active) return;
         let nextDay = applyPendingOperations(remote, pending) as DayState;
         if (!pending.length && !remote.logs.length && !remote.todos.length && (cached.logs.length || cached.todos.length)) {
-          nextDay = await transport.importDay(date, cached, `device-initial:${date}`) as DayState;
+          nextDay = await activeTransport.importDay(date, cached, `device-initial:${date}`) as DayState;
         }
         setDay(nextDay);
         if (pending.length) await flushPending();
         else setSyncState("synced");
       } catch (error) {
-        if (transport.owner === "supabase" && errorStatus(error) === 401) {
+        if (activeTransport.owner === "supabase" && errorStatus(error) === 401) {
           requireSignIn();
         } else if (active) {
           setSyncState("offline");
