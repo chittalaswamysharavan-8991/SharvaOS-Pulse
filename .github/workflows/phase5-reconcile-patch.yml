@@ -1,0 +1,24 @@
+name: Phase 5 reconciliation conflict patch
+on:
+  push:
+    branches:
+      - phase5/reconciliation-conflict
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase5/reconciliation-conflict
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: node scripts/phase5-reconcile-patch.mjs
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: resolve cached import conflicts canonically"
+          git push origin HEAD:phase5/reconciliation-conflict
