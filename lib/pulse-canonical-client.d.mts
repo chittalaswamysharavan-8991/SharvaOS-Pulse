@@ -18,6 +18,8 @@ export type PulseCanonicalClient = {
 
 export function createPulseCanonicalClient(input: {
   functionUrl: string;
-  accessToken: string;
+  accessToken?: string;
+  getAccessToken?: () => string | Promise<string>;
+  publishableKey?: string;
   fetchImpl?: typeof fetch;
 }): PulseCanonicalClient;
