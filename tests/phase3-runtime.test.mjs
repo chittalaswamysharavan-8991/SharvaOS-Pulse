@@ -89,8 +89,24 @@ test("expired sessions refresh before canonical requests and dynamic JWTs are us
   assert.equal(canonicalCalls[0].options.headers.apikey, "sb_publishable_test_key_123456789");
 });
 
-test("runtime configuration fails closed to D1 and enables Supabase only when complete", () => {
-  assert.equal(normalizePulseRuntimeConfig({ requestedOwner: "supabase" }).dataOwner, "d1");
+test("runtime configuration blocks implicit fallback and enables only explicit owners", () => {
+  assert.equal(normalizePulseRuntimeConfig(null).dataOwner, "blocked");
+  assert.equal(normalizePulseRuntimeConfig({ requestedOwner: "supabase" }).dataOwner, "blocked");
+  assert.equal(normalizePulseRuntimeConfig({
+    requestedOwner: "supabase",
+    dataOwner: "d1",
+    cutoverReady: false,
+    reason: "missing configuration",
+  }).dataOwner, "blocked");
+
+  const rollback = normalizePulseRuntimeConfig({
+    requestedOwner: "d1",
+    dataOwner: "d1",
+    cutoverReady: true,
+    supabase: null,
+  });
+  assert.equal(rollback.dataOwner, "d1");
+
   const ready = normalizePulseRuntimeConfig({
     requestedOwner: "supabase",
     dataOwner: "supabase",
@@ -197,7 +213,9 @@ test("Phase 3 source exposes only publishable runtime config and contains no liv
   const source = files.join("\n");
   assert.match(source, /SHARVAOS_PULSE_DATA_OWNER/);
   assert.match(source, /SUPABASE_PUBLISHABLE_KEY/);
+  assert.match(source, /dataOwner:\s*"blocked"/);
   assert.match(source, /create_user:\s*false/);
+  assert.doesNotMatch(source, /Supabase configuration check failed; D1 rollback is active/);
   assert.doesNotMatch(source, /SERVICE_ROLE|service_role/i);
   assert.doesNotMatch(source, /sb_publishable_L_bLdMqmiz9QvTVZIZ_j8A_2-nY_apM/);
 });
