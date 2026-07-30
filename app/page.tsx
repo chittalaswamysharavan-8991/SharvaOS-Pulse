@@ -3,11 +3,17 @@
 import {
   FormEvent,
   PointerEvent as ReactPointerEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import {
+  applyOperation,
+  applyPendingOperations,
+  parsePendingOperations,
+} from "../lib/pulse-reliability.mjs";
 
 type LogKind = "water" | "smoke" | "food";
 type CardKind = LogKind | "tasks";
@@ -21,6 +27,18 @@ type LogEntry = {
 };
 type Todo = { id: string; text: string; done: boolean; createdAt: number };
 type DayState = { logs: LogEntry[]; todos: Todo[] };
+type PendingOperation = {
+  queueId: string;
+  body: Record<string, unknown>;
+  createdAt: number;
+};
+type DayResponse = {
+  ok?: boolean;
+  logs?: LogEntry[];
+  todos?: Todo[];
+  day?: DayState;
+  error?: string;
+};
 
 const EMPTY_DAY: DayState = { logs: [], todos: [] };
 const FOOD_TYPES = ["Breakfast", "Lunch", "Snack", "Dinner"];
@@ -44,6 +62,23 @@ function uid() {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+class SyncError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
+async function requestDay(date: string, body?: Record<string, unknown>): Promise<DayResponse> {
+  const response = await fetch(body ? "/api/day" : `/api/day?date=${date}`, body ? {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...body, date }),
+  } : undefined);
+  const payload = await response.json().catch(() => ({ error: "Sync unavailable" })) as DayResponse;
+  if (!response.ok) throw new SyncError(payload.error || "Sync unavailable", response.status);
+  return payload;
+}
+
 export default function Home() {
   const [day, setDay] = useState<DayState>(EMPTY_DAY);
   const [ready, setReady] = useState(false);
@@ -57,48 +92,92 @@ export default function Home() {
   const [selectedCard, setSelectedCard] = useState<CardKind | null>(null);
   const pressTimer = useRef<number | null>(null);
   const longPressed = useRef(false);
+  const pendingRef = useRef<PendingOperation[]>([]);
+  const flushInFlight = useRef(false);
   const date = dayKey();
   const storageKey = `sharvaos-daily-pulse:${date}`;
+  const pendingKey = `${storageKey}:pending`;
 
-  async function api(body?: Record<string, unknown>) {
-    const response = await fetch(body ? "/api/day" : `/api/day?date=${date}`, body ? {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...body, date }),
-    } : undefined);
-    if (!response.ok) throw new Error("Sync unavailable");
-    return response.json();
-  }
+  const savePending = useCallback((operations: PendingOperation[]) => {
+    pendingRef.current = operations;
+    localStorage.setItem(pendingKey, JSON.stringify(operations));
+  }, [pendingKey]);
+
+  const flushPending = useCallback(async () => {
+    if (flushInFlight.current || !pendingRef.current.length) return;
+    flushInFlight.current = true;
+    setSyncState("syncing");
+    try {
+      while (pendingRef.current.length) {
+        const operation = pendingRef.current[0];
+        try {
+          const result = await requestDay(date, operation.body);
+          const remaining = pendingRef.current.filter((item) => item.queueId !== operation.queueId);
+          savePending(remaining);
+          if (result.day) {
+            setDay(applyPendingOperations(result.day, remaining) as DayState);
+          }
+        } catch (error) {
+          if (error instanceof SyncError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+            const remaining = pendingRef.current.filter((item) => item.queueId !== operation.queueId);
+            savePending(remaining);
+            setToast(error.message);
+            const remote = await requestDay(date);
+            if (remote.logs && remote.todos) {
+              setDay(applyPendingOperations(remote as DayState, remaining) as DayState);
+            }
+            continue;
+          }
+          throw error;
+        }
+      }
+      setSyncState("synced");
+    } catch {
+      setSyncState("offline");
+      setToast("Saved on device · sync will retry automatically");
+    } finally {
+      flushInFlight.current = false;
+    }
+  }, [date, savePending]);
 
   useEffect(() => {
     let active = true;
     async function load() {
       let cached: DayState = EMPTY_DAY;
+      let pending: PendingOperation[] = [];
       try {
         const raw = localStorage.getItem(storageKey);
-        if (raw) cached = JSON.parse(raw);
+        if (raw) cached = JSON.parse(raw) as DayState;
+        pending = parsePendingOperations(localStorage.getItem(pendingKey)) as PendingOperation[];
+        pendingRef.current = pending;
         if (active && (cached.logs.length || cached.todos.length)) setDay(cached);
       } catch {}
       try {
-        const remote = await api();
-        if (!active) return;
-        if (!remote.logs.length && !remote.todos.length && (cached.logs.length || cached.todos.length)) {
-          await api({ action: "import_day", logs: cached.logs, todos: cached.todos });
-          const imported = await api();
-          setDay(imported);
-        } else {
-          setDay(remote);
+        const remote = await requestDay(date);
+        if (!active || !remote.logs || !remote.todos) return;
+        let nextDay = applyPendingOperations(remote as DayState, pending) as DayState;
+        if (!pending.length && !remote.logs.length && !remote.todos.length && (cached.logs.length || cached.todos.length)) {
+          const imported = await requestDay(date, { action: "import_day", logs: cached.logs, todos: cached.todos });
+          nextDay = imported.day ?? nextDay;
         }
-        setSyncState("synced");
+        setDay(nextDay);
+        if (pending.length) await flushPending();
+        else setSyncState("synced");
       } catch {
         if (active) setSyncState("offline");
       } finally {
         if (active) setReady(true);
       }
     }
-    load();
+    void load();
     return () => { active = false; };
-  }, [storageKey]);
+  }, [date, flushPending, pendingKey, storageKey]);
+
+  useEffect(() => {
+    function retry() { void flushPending(); }
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, [flushPending]);
 
   useEffect(() => {
     if (ready) localStorage.setItem(storageKey, JSON.stringify(day));
@@ -123,22 +202,19 @@ export default function Home() {
   const completedTodos = day.todos.filter((x) => x.done).length;
   const progress = day.todos.length ? Math.round((completedTodos / day.todos.length) * 100) : 0;
 
-  async function persist(body: Record<string, unknown>) {
+  function persist(body: Record<string, unknown>) {
+    const operation: PendingOperation = { queueId: uid(), body, createdAt: Date.now() };
+    const pending = [...pendingRef.current, operation];
+    savePending(pending);
+    setDay((current) => applyOperation(current, body) as DayState);
     setSyncState("syncing");
-    try {
-      await api(body);
-      setSyncState("synced");
-    } catch {
-      setSyncState("offline");
-      setToast("Saved on device · sync will retry next visit");
-    }
+    void flushPending();
   }
   function addLog(entry: Omit<LogEntry, "id" | "loggedAt">) {
     const next = { ...entry, id: uid(), loggedAt: Date.now() };
-    setDay((current) => ({ ...current, logs: [next, ...current.logs] }));
     setUndoEntry(next);
     setToast(`${entry.label} logged`);
-    void persist({ action: "add_log", ...next });
+    persist({ action: "add_log", ...next });
   }
   function addWater(amount: number) {
     addLog({ kind: "water", label: `${amount} ml water`, detail: "Hydration", amount });
@@ -158,28 +234,23 @@ export default function Home() {
     const text = todoText.trim();
     if (!text) return;
     const next = { id: uid(), text, done: false, createdAt: Date.now() };
-    setDay((current) => ({ ...current, todos: [...current.todos, next] }));
     setTodoText("");
     setToast("Task added");
-    void persist({ action: "add_todo", ...next });
+    persist({ action: "add_todo", ...next });
   }
   function toggleTodo(id: string) {
     const nextDone = !day.todos.find((x) => x.id === id)?.done;
-    setDay((current) => ({ ...current, todos: current.todos.map((x) =>
-      x.id === id ? { ...x, done: nextDone } : x) }));
-    void persist({ action: "toggle_todo", id, done: nextDone });
+    persist({ action: "toggle_todo", id, done: nextDone });
   }
   function removeTodo(id: string) {
-    setDay((current) => ({ ...current, todos: current.todos.filter((x) => x.id !== id) }));
-    void persist({ action: "delete_todo", id });
+    persist({ action: "delete_todo", id });
   }
   function undoLast() {
     if (!undoEntry) return;
     const id = undoEntry.id;
-    setDay((current) => ({ ...current, logs: current.logs.filter((x) => x.id !== id) }));
     setUndoEntry(null);
     setToast("Last entry removed");
-    void persist({ action: "delete_log", id });
+    persist({ action: "delete_log", id });
   }
   function startPress(kind: CardKind) {
     longPressed.current = false;

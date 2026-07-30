@@ -13,10 +13,11 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -24,6 +25,18 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: package-lock.json
+
+      - name: Verify immutable source baseline
+        shell: bash
+        run: |
+          git fetch --tags --force
+          test "$(git rev-list -n 1 v2.0.0-baseline)" = "43c9c2caa237e326e08671606d4b3b5aa117e5ec"
+          grep -F "424f549ad660febe9e2f518736ddfb1e728f87d61654c439d6ede5223807072e" SOURCE_PROVENANCE.md
+          test "$(git show v2.0.0-baseline:app/page.tsx | sha256sum | cut -d' ' -f1)" = "25dbbe927d77520bea38827a43bded750c8cfa6bec38b7059d1f236eeeeea55c"
+          test "$(git show v2.0.0-baseline:app/globals.css | sha256sum | cut -d' ' -f1)" = "ca822bb74d7131dc39b84c0ce1cc3efbff28ecb3422ec36e2f2aefe79ed5f78d"
+
+      - name: Verify normalized version
+        run: node -e "const p=require('./package.json'); const l=require('./package-lock.json'); if (p.version !== '2.1.0' || l.version !== '2.1.0' || l.packages[''].version !== '2.1.0') process.exit(1)"
 
       - name: Install
         run: npm ci
@@ -45,11 +58,15 @@ jobs:
         shell: bash
         run: |
           mkdir -p verification
+          version="$(node -p "require('./package.json').version")"
           {
             echo "commit=${GITHUB_SHA}"
             echo "run_id=${GITHUB_RUN_ID}"
             echo "node=$(node --version)"
             echo "npm=$(npm --version)"
+            echo "version=${version}"
+            echo "baseline_tag=v2.0.0-baseline"
+            echo "baseline_commit=43c9c2caa237e326e08671606d4b3b5aa117e5ec"
             echo "zip_sha256=424f549ad660febe9e2f518736ddfb1e728f87d61654c439d6ede5223807072e"
           } > verification/ci-evidence.txt
 
@@ -57,5 +74,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sharvaos-pulse-ci-evidence
+          name: sharvaos-pulse-v21-ci-evidence
           path: verification/ci-evidence.txt
