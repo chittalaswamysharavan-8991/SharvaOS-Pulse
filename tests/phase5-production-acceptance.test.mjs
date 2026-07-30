@@ -26,7 +26,7 @@ const health = {
   configSource: "public-default",
   canonicalFunction: "configured",
   authentication: "owner-session-required",
-  sourceCommit: "748ecee2b36dbf40bd990ac0d3fd4aa6a90d02f2",
+  sourceCommit: "d460e9b7b5001d590902e2d5821b805ef1c98f1f",
 };
 
 const config = {
@@ -47,8 +47,15 @@ const homeShell = [
   "<h2>Checking canonical runtime…</h2>",
 ].join("");
 
+const exactExpected = {
+  expectedVersion: "2.2.0",
+  expectedContract: "sharvaos.pulse.v1",
+  expectedSourceCommit: health.sourceCommit,
+};
+
 test("Phase 5 validators accept the reviewed production contract", () => {
   assert.equal(validateHealth(health).status, "ready");
+  assert.equal(validateHealth(health, exactExpected).sourceCommit, health.sourceCommit);
   assert.equal(validateRuntimeConfig(config).dataOwner, "supabase");
   assert.equal(validateHomeShell(homeShell), true);
 });
@@ -72,6 +79,7 @@ test("production acceptance verifies health, runtime, shell, and anonymous rejec
   assert.equal(evidence.result, "PASS");
   assert.equal(evidence.productionShell, "ready");
   assert.equal(evidence.anonymousCanonicalMutation, "denied");
+  assert.equal(evidence.sourceCommit, health.sourceCommit);
   assert.equal(calls.length, 4);
   assert.equal(calls[3].options.headers.apikey, config.supabase.publishableKey);
   assert.equal(calls[3].options.headers.authorization, undefined);
@@ -86,13 +94,23 @@ test("hydrated owner gate remains existing-user-only in production source", asyn
   assert.match(page, /Use email code recovery/);
   assert.match(page, /New Supabase users are blocked/);
   assert.match(page, /SUPABASE CANONICAL/);
-  assert.match(authClient, /provider\", \"google|provider\", \"google/);
+  assert.match(authClient, /provider", "google|provider", "google/);
   assert.match(authClient, /create_user:\s*false/);
 });
 
-test("production acceptance rejects a deployment from an unexpected commit", () => {
+test("production acceptance rejects a malformed source commit", () => {
   assert.throws(
     () => validateHealth({ ...health, sourceCommit: "wrong" }),
+    /full Git SHA/,
+  );
+});
+
+test("production acceptance can enforce an exact reviewed deployment commit", () => {
+  assert.throws(
+    () => validateHealth(
+      { ...health, sourceCommit: "1111111111111111111111111111111111111111" },
+      exactExpected,
+    ),
     /production source commit mismatch/,
   );
 });
