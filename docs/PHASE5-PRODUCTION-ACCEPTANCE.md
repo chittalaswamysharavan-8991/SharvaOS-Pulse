@@ -12,16 +12,27 @@ Close the gap between “deployed” and “operationally accepted” without ex
 
 ## Automated production acceptance
 
-`scripts/verify-production-acceptance.mjs` performs the public-safe checks:
+`scripts/verify-production-acceptance.mjs` performs the public-safe live checks:
 
 1. `GET /api/health` returns HTTP 200 and the expected release, contract, Supabase owner, owner-session requirement and immutable source commit.
 2. `GET /api/runtime-config` resolves to a ready Supabase canonical configuration using only public client coordinates.
-3. The production page exposes the existing-owner sign-in gate and states that new users are not created.
+3. The production root returns the expected SharvaOS Pulse title and canonical-runtime loading shell.
 4. A direct Edge Function request without a user bearer JWT is rejected with HTTP 401 or 403.
-5. Health, runtime and page responses contain no privileged credential or owner identity.
+5. Health, runtime and page-shell responses contain no privileged credential or owner identity.
 6. A JSON evidence artifact is generated for the workflow run.
 
 The checks run in `.github/workflows/production-acceptance.yml` and contain no repository secret.
+
+## Owner-gate contract proof
+
+The OTP form is client-rendered after runtime configuration is loaded, so it is not asserted from raw server HTML. Repository tests verify that:
+
+- the hydrated UI contains `Sign in to your private Pulse`;
+- it states that new accounts are never created from the screen;
+- it labels the active owner as `SUPABASE CANONICAL`;
+- OTP requests use `create_user: false`.
+
+A connected browser separately verifies that the deployed hydrated UI renders this owner gate. This source/browser split avoids treating a client-rendered screen as server-rendered HTML.
 
 ## Canonical database acceptance
 
