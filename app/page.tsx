@@ -20,6 +20,7 @@ import { loadPulseRuntimeConfig } from "../lib/pulse-runtime-config.mjs";
 import {
   createCanonicalPulseTransport,
   createD1PulseTransport,
+  selectMissingDayEntries,
 } from "../lib/pulse-transport.mjs";
 
 type LogKind = "water" | "smoke" | "food";
@@ -231,8 +232,9 @@ export default function Home() {
         const remote = await activeTransport.readDay(date) as DayState;
         if (!active) return;
         let nextDay = applyPendingOperations(remote, pending) as DayState;
-        if (!pending.length && !remote.logs.length && !remote.todos.length && (cached.logs.length || cached.todos.length)) {
-          nextDay = await activeTransport.importDay(date, cached, `device-initial:${date}`) as DayState;
+        const missingCached = selectMissingDayEntries(cached, remote) as DayState;
+        if (!pending.length && (missingCached.logs.length || missingCached.todos.length)) {
+          nextDay = await activeTransport.importDay(date, missingCached, `device-initial:${date}`) as DayState;
         }
         setDay(nextDay);
         if (pending.length) await flushPending();
