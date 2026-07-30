@@ -12,6 +12,7 @@
 - Stable offline queue idempotency mapping: implemented
 - Auth-expiry queue preservation: implemented
 - Device cache remains readable while synchronization is blocked
+- New blocked-state captures remain queued and immediately report device/offline mode instead of false syncing
 - Pending operations drain before cached-day reconciliation
 - Partial canonical days reconcile missing device logs and tasks by ID or deterministic fingerprint
 - Canonical initial import is split into bounded 100-item batches without silent truncation
