@@ -1,6 +1,12 @@
 export type PulseRuntimeConfig =
   | { requestedOwner: "d1"; dataOwner: "d1"; cutoverReady: true; supabase: null }
-  | { requestedOwner: "supabase"; dataOwner: "d1"; cutoverReady: false; reason: string; supabase: null }
+  | {
+      requestedOwner: "supabase" | "unknown";
+      dataOwner: "blocked";
+      cutoverReady: false;
+      reason: string;
+      supabase: null;
+    }
   | {
       requestedOwner: "supabase";
       dataOwner: "supabase";
@@ -9,5 +15,6 @@ export type PulseRuntimeConfig =
     };
 
 export const D1_RUNTIME_CONFIG: PulseRuntimeConfig;
+export const BLOCKED_RUNTIME_CONFIG: PulseRuntimeConfig;
 export function normalizePulseRuntimeConfig(value: unknown): PulseRuntimeConfig;
 export function loadPulseRuntimeConfig(fetchImpl?: typeof fetch): Promise<PulseRuntimeConfig>;
