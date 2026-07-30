@@ -60,6 +60,13 @@ The database canary used the existing authenticated owner identity, exercised th
 - New canonical indexes may appear as unused until real traffic exists; they support the declared day, kind and receipt access paths.
 - Remaining warnings concern the pre-existing legacy water RPC surface, tables intentionally hidden behind RPCs, and the project-level leaked-password setting. They are compatibility/Auth hardening debt outside this migration.
 
+## Scope audit
+
+- UI source and CSS: unchanged.
+- Current D1 fallback behavior: unchanged.
+- Service-role keys, JWTs and private credentials: absent.
+- Production changes are limited to the additive canonical schema, compatibility triggers, hardened grants and authenticated Edge Function.
+
 ## Known runtime boundary
 
 The Edge Function deployment is active, but this execution environment could not perform a public network curl because DNS resolution is unavailable. Runtime integration must therefore be rechecked from staging with a real Supabase user session before UI cutover.
