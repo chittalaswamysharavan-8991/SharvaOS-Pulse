@@ -9,6 +9,8 @@ import {
   resolvePulseRuntimeValues,
 } from "../lib/pulse-public-runtime.mjs";
 
+const d1Binding = { prepare() {} };
+
 test("Phase 4 defaults to the Supabase canonical owner without private secrets", () => {
   const config = resolvePulseRuntimeValues({});
   assert.equal(config.requestedOwner, "supabase");
@@ -18,13 +20,22 @@ test("Phase 4 defaults to the Supabase canonical owner without private secrets",
   assert.deepEqual(config.supabase, PUBLIC_SUPABASE_RUNTIME);
 });
 
-test("Phase 4 rollback requires an explicit D1 owner selection", () => {
-  const config = resolvePulseRuntimeValues({ SHARVAOS_PULSE_DATA_OWNER: "d1" });
-  assert.equal(config.requestedOwner, "d1");
-  assert.equal(config.dataOwner, "d1");
-  assert.equal(config.cutoverReady, true);
-  assert.equal(config.configSource, "environment");
-  assert.equal(config.supabase, null);
+test("Phase 4 rollback requires an explicit D1 owner and live binding", () => {
+  const blocked = resolvePulseRuntimeValues({ SHARVAOS_PULSE_DATA_OWNER: "d1" });
+  assert.equal(blocked.requestedOwner, "d1");
+  assert.equal(blocked.dataOwner, "blocked");
+  assert.equal(blocked.cutoverReady, false);
+  assert.match(blocked.reason, /D1 binding `DB` is unavailable/);
+
+  const ready = resolvePulseRuntimeValues({
+    SHARVAOS_PULSE_DATA_OWNER: "d1",
+    DB: d1Binding,
+  });
+  assert.equal(ready.requestedOwner, "d1");
+  assert.equal(ready.dataOwner, "d1");
+  assert.equal(ready.cutoverReady, true);
+  assert.equal(ready.configSource, "environment");
+  assert.equal(ready.supabase, null);
 });
 
 test("invalid explicit runtime owners fail closed", () => {
@@ -75,5 +86,6 @@ test("health endpoint reports safe operational metadata only", async () => {
   const source = await readFile(new URL("../app/api/health/route.ts", import.meta.url), "utf8");
   assert.match(source, /owner-session-required/);
   assert.match(source, /SHARVAOS_PULSE_DATA_OWNER=d1/);
+  assert.match(source, /live Cloudflare DB binding/);
   assert.doesNotMatch(source, /publishableKey|access_token|refresh_token|owner email/i);
 });
