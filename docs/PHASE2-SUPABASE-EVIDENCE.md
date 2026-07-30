@@ -67,6 +67,10 @@ The database canary used the existing authenticated owner identity, exercised th
 - Service-role keys, JWTs and private credentials: absent.
 - Production changes are limited to the additive canonical schema, compatibility triggers, hardened grants and authenticated Edge Function.
 
+## Repository verification
+
+The exact latest pull-request head must pass immutable baseline verification, version verification, `npm ci`, lint, typecheck, build, all tests, evidence generation and artifact upload before merge.
+
 ## Known runtime boundary
 
 The Edge Function deployment is active, but this execution environment could not perform a public network curl because DNS resolution is unavailable. Runtime integration must therefore be rechecked from staging with a real Supabase user session before UI cutover.
