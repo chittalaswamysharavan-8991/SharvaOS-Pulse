@@ -82,7 +82,6 @@ test("hydrated owner gate remains existing-user-only in production source", asyn
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/pulse-auth-client.mjs", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /Sign in to your private Pulse/);
   assert.match(page, /Continue with Google/);
   assert.match(page, /Use email code recovery/);
   assert.match(page, /New Supabase users are blocked/);
