@@ -3,10 +3,10 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
 const DEFAULTS = Object.freeze({
-  productionUrl: "https://sharvaos-pulse.vercel.app",
+  productionUrl: "https://sharvaos-pulse-google.vercel.app",
   expectedVersion: "2.2.0",
   expectedContract: "sharvaos.pulse.v1",
-  expectedSourceCommit: "af1cee26053ce4027bf87e8154473d5edcf04d2d",
+  expectedSourceCommit: "748ecee2b36dbf40bd990ac0d3fd4aa6a90d02f2",
 });
 
 function invariant(condition, message) {
