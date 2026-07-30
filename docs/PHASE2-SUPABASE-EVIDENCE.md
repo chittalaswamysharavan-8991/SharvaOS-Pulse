@@ -1,11 +1,11 @@
 # Phase 2 — Supabase canonical owner evidence
 
-## Applied production migration
+## Applied production migrations
 
 - Project: `sharvaos-live-control-room`
 - Project ref: `vhzzugeeadaijkzrvowx`
-- Migration name: `canonical_pulse_v1`
-- Result: success
+- `canonical_pulse_v1`: success
+- `harden_pulse_function_grants`: success
 
 ## Deployed function
 
@@ -39,6 +39,26 @@ The database canary used the existing authenticated owner identity, exercised th
 - log soft-delete read-back: PASS
 - task soft-delete read-back: PASS
 - canary cleanup: PASS
+- remaining canary logs, todos and receipts: `0 / 0 / 0`
+
+## Function privilege audit
+
+| Function | Anonymous | Authenticated | Public |
+|---|---:|---:|---:|
+| `pulse_read_day` | denied | allowed | denied |
+| `pulse_apply_mutation` | denied | allowed | denied |
+| `pulse_mirror_legacy_water_insert` | denied | denied | denied |
+| `pulse_mirror_legacy_water_void` | denied | denied | denied |
+
+`pulse_apply_mutation` is intentionally `SECURITY DEFINER` because direct table mutations are revoked. It requires `auth.uid()`, has a fixed empty search path, validates the action and payload, and records an idempotent receipt before returning authoritative state.
+
+## Advisor audit
+
+- Phase 2 trigger-function exposure: fixed.
+- New critical security findings caused by Phase 2: none.
+- New blocking performance findings caused by Phase 2: none.
+- New canonical indexes may appear as unused until real traffic exists; they support the declared day, kind and receipt access paths.
+- Remaining warnings concern the pre-existing legacy water RPC surface, tables intentionally hidden behind RPCs, and the project-level leaked-password setting. They are compatibility/Auth hardening debt outside this migration.
 
 ## Known runtime boundary
 
