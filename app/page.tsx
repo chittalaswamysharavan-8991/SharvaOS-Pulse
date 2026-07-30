@@ -78,7 +78,7 @@ export default function Home() {
   const [ready, setReady] = useState(false);
   const [runtimeReady, setRuntimeReady] = useState(false);
   const [transportVersion, setTransportVersion] = useState(0);
-  const [dataOwner, setDataOwner] = useState<"d1" | "supabase">("d1");
+  const [dataOwner, setDataOwner] = useState<"d1" | "supabase" | "unavailable">("unavailable");
   const [runtimeNotice, setRuntimeNotice] = useState("");
   const [authPhase, setAuthPhase] = useState<AuthPhase>("loading");
   const [authEmail, setAuthEmail] = useState("");
@@ -165,9 +165,18 @@ export default function Home() {
           transportRef.current = createD1PulseTransport();
           setDataOwner("d1");
           setAuthPhase("d1");
-          setRuntimeNotice(config.requestedOwner === "supabase" ? config.reason : "");
+          setRuntimeNotice("");
           setRuntimeReady(true);
           setTransportVersion((value) => value + 1);
+          return;
+        }
+        if (config.dataOwner === "blocked") {
+          transportRef.current = null;
+          setDataOwner("unavailable");
+          setAuthPhase("loading");
+          setRuntimeNotice(config.reason);
+          setSyncState("offline");
+          setRuntimeReady(true);
           return;
         }
 
@@ -199,12 +208,12 @@ export default function Home() {
         setRuntimeReady(true);
       } catch (error) {
         if (!active) return;
-        transportRef.current = createD1PulseTransport();
-        setDataOwner("d1");
-        setAuthPhase("d1");
-        setRuntimeNotice(`Supabase configuration check failed; D1 rollback is active. ${errorMessage(error, "")}`.trim());
+        transportRef.current = null;
+        setDataOwner("unavailable");
+        setAuthPhase("loading");
+        setRuntimeNotice(`Runtime owner check unavailable; changes remain queued on this device. ${errorMessage(error, "")}`.trim());
+        setSyncState("offline");
         setRuntimeReady(true);
-        setTransportVersion((value) => value + 1);
       }
     }
     void initializeRuntime();
@@ -212,9 +221,8 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const transport = transportRef.current;
-    if (!runtimeReady || !transport) return;
-    const activeTransport = transport;
+    if (!runtimeReady) return;
+    const configuredTransport = transportRef.current;
     let active = true;
     async function load() {
       let cached: DayState = EMPTY_DAY;
@@ -228,17 +236,37 @@ export default function Home() {
         pendingRef.current = pending;
         if (active && (cached.logs.length || cached.todos.length)) setDay(cached);
       } catch {}
+      if (!configuredTransport) {
+        if (active) {
+          setSyncState("offline");
+          setReady(true);
+        }
+        return;
+      }
+      const activeTransport = configuredTransport;
       try {
         const remote = await activeTransport.readDay(date) as DayState;
         if (!active) return;
         let nextDay = applyPendingOperations(remote, pending) as DayState;
-        const missingCached = selectMissingDayEntries(cached, remote) as DayState;
-        if (!pending.length && (missingCached.logs.length || missingCached.todos.length)) {
-          nextDay = await activeTransport.importDay(date, missingCached, `device-initial:${date}`) as DayState;
-        }
         setDay(nextDay);
-        if (pending.length) await flushPending();
-        else setSyncState("synced");
+        if (pending.length) {
+          await flushPending();
+          if (pendingRef.current.length) return;
+          const confirmed = await activeTransport.readDay(date) as DayState;
+          const missingAfterQueue = selectMissingDayEntries(cached, confirmed) as DayState;
+          nextDay = missingAfterQueue.logs.length || missingAfterQueue.todos.length
+            ? await activeTransport.importDay(date, missingAfterQueue, `device-initial:${date}`) as DayState
+            : confirmed;
+          setDay(nextDay);
+          setSyncState("synced");
+        } else {
+          const missingCached = selectMissingDayEntries(cached, remote) as DayState;
+          if (missingCached.logs.length || missingCached.todos.length) {
+            nextDay = await activeTransport.importDay(date, missingCached, `device-initial:${date}`) as DayState;
+            setDay(nextDay);
+          }
+          setSyncState("synced");
+        }
       } catch (error) {
         if (activeTransport.owner === "supabase" && errorStatus(error) === 401) {
           requireSignIn();
@@ -476,14 +504,14 @@ export default function Home() {
       <header className="topbar">
         <div className="brand"><div className="brand-mark">S</div><div><p className="eyebrow">SHARVAOS</p><h1>Daily Pulse</h1></div></div>
         <div style={{ alignItems: "center", display: "flex", gap: 12 }}>
-          <div className="day-status"><span className={`status-dot ${syncState}`} /><div><strong>{syncState === "synced" ? "Synced" : syncState === "syncing" ? "Syncing…" : "Device mode"}</strong><span>{ready ? `${todayLabel()} · ${dataOwner === "supabase" ? "Supabase" : "D1 fallback"}` : "Loading today…"}</span></div></div>
+          <div className="day-status"><span className={`status-dot ${syncState}`} /><div><strong>{syncState === "synced" ? "Synced" : syncState === "syncing" ? "Syncing…" : "Device mode"}</strong><span>{ready ? `${todayLabel()} · ${dataOwner === "supabase" ? "Supabase" : dataOwner === "d1" ? "D1 rollback" : "Sync blocked"}` : "Loading today…"}</span></div></div>
           {dataOwner === "supabase" && <button onClick={() => void signOut()} style={{ background: "transparent", border: "1px solid var(--line)", borderRadius: 999, color: "var(--muted)", cursor: "pointer", padding: "8px 12px" }} type="button">Sign out</button>}
         </div>
       </header>
 
       <section className="hero">
         <div><p className="hero-kicker">TODAY · HUMAN MODE</p><h2>Namaskaram, Sharva.<span>Let&apos;s keep today clear.</span></h2></div>
-        <div className="local-note"><span>⌁</span><p><strong>{runtimeNotice ? "Rollback active" : "Press & hold any card"}</strong>{runtimeNotice || "See totals, recent entries and quick actions."}</p></div>
+        <div className="local-note"><span>⌁</span><p><strong>{runtimeNotice ? (dataOwner === "unavailable" ? "Sync blocked" : "Rollback active") : "Press & hold any card"}</strong>{runtimeNotice || "See totals, recent entries and quick actions."}</p></div>
       </section>
 
       <section className="metric-grid" aria-label="Today summary">
@@ -545,7 +573,7 @@ export default function Home() {
         </div>
       </section>
 
-      <footer><span>SharvaOS · Daily Pulse</span><p>Live naturally. Capture carefully.</p><span>{syncState === "synced" ? (dataOwner === "supabase" ? "Supabase canonical" : "D1 rollback") : "Offline cache"}</span></footer>
+      <footer><span>SharvaOS · Daily Pulse</span><p>Live naturally. Capture carefully.</p><span>{syncState === "synced" ? (dataOwner === "supabase" ? "Supabase canonical" : dataOwner === "d1" ? "D1 rollback" : "Sync blocked") : "Offline cache"}</span></footer>
 
       {selectedCard && <div className="sheet-backdrop" onPointerDown={() => setSelectedCard(null)}>
         <section className={`detail-sheet ${selectedCard}`} role="dialog" aria-modal="true" aria-label={`${selectedCard} details`} onPointerDown={(e) => e.stopPropagation()}>
