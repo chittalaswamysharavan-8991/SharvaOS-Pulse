@@ -435,12 +435,18 @@ export default function Home() {
   function removeTodo(id: string) {
     persist({ action: "delete_todo", id });
   }
+  function removeLog(entry: LogEntry) {
+    if (!window.confirm(`Delete ${entry.label}?`)) return;
+    if (undoEntry?.id === entry.id) setUndoEntry(null);
+    setToast(`${entry.label} deleted`);
+    persist({ action: "delete_log", id: entry.id });
+  }
   function undoLast() {
     if (!undoEntry) return;
-    const id = undoEntry.id;
+    const entry = undoEntry;
     setUndoEntry(null);
     setToast("Last entry removed");
-    persist({ action: "delete_log", id });
+    persist({ action: "delete_log", id: entry.id });
   }
   function startPress(kind: CardKind) {
     longPressed.current = false;
@@ -618,7 +624,7 @@ export default function Home() {
         <div className="panel-heading"><div><p className="eyebrow">TODAY&apos;S TRACE</p><h3>Your day, as it happened.</h3></div><span className="timeline-total">{day.logs.length} entries</span></div>
         <div className="timeline">
           {!day.logs.length && <div className="empty-timeline"><span className="pulse-ring" /><p>Your first capture will appear here.</p></div>}
-          {day.logs.map((entry, index) => <article className={`timeline-entry ${entry.kind}`} key={entry.id} style={{ "--delay": `${index * 40}ms` } as React.CSSProperties}><div className="entry-icon">{entry.kind === "water" ? "◒" : entry.kind === "smoke" ? "≋" : "◉"}</div><div><strong>{entry.label}</strong><span>{entry.detail}</span></div><time>{currentTime(entry.loggedAt)}</time></article>)}
+          {day.logs.map((entry, index) => <article className={`timeline-entry ${entry.kind}`} key={entry.id} style={{ "--delay": `${index * 40}ms` } as React.CSSProperties}><div className="entry-icon">{entry.kind === "water" ? "◒" : entry.kind === "smoke" ? "≋" : "◉"}</div><div><strong>{entry.label}</strong><span>{entry.detail}</span></div><time>{currentTime(entry.loggedAt)}</time><button aria-label={`Delete ${entry.label}`} onClick={() => removeLog(entry)} style={{ background: "transparent", border: "1px solid var(--line)", borderRadius: 999, color: "var(--muted)", cursor: "pointer", fontSize: 16, height: 32, width: 32 }} type="button">×</button></article>)}
         </div>
       </section>
 
@@ -634,7 +640,7 @@ export default function Home() {
           {selectedCard === "water" && <div className="sheet-actions"><button onClick={() => addWater(250)}>+250 ml</button><button onClick={() => addWater(500)}>+500 ml</button></div>}
           {selectedCard === "smoke" && <div className="sheet-actions"><button onClick={addSmoke}>Log smoke now</button></div>}
           {selectedCard === "food" && <div className="sheet-actions"><button onClick={() => { setSelectedCard(null); setActiveCapture("food"); document.querySelector(".capture-panel")?.scrollIntoView({ behavior: "smooth" }); }}>Add a meal</button></div>}
-          {selectedCard !== "tasks" && <div className="sheet-history"><p className="eyebrow">RECENT</p>{!recent(selectedCard).length && <span className="sheet-empty">No entries yet.</span>}{recent(selectedCard).map((entry) => <div key={entry.id}><span>{entry.label}<small>{entry.detail}</small></span><time>{currentTime(entry.loggedAt)}</time></div>)}</div>}
+          {selectedCard !== "tasks" && <div className="sheet-history"><p className="eyebrow">RECENT</p>{!recent(selectedCard).length && <span className="sheet-empty">No entries yet.</span>}{recent(selectedCard).map((entry) => <div key={entry.id}><span>{entry.label}<small>{entry.detail}</small></span><time>{currentTime(entry.loggedAt)}</time><button aria-label={`Delete ${entry.label}`} className="sheet-check" onClick={() => removeLog(entry)} type="button">Delete</button></div>)}</div>}
           {selectedCard === "tasks" && <div className="sheet-history"><p className="eyebrow">OPEN TASKS</p>{!day.todos.filter((x) => !x.done).length && <span className="sheet-empty">You&apos;re clear.</span>}{day.todos.filter((x) => !x.done).map((todo) => <div key={todo.id}><span>{todo.text}</span><button className="sheet-check" onClick={() => toggleTodo(todo.id)}>Done</button></div>)}</div>}
         </section>
       </div>}
