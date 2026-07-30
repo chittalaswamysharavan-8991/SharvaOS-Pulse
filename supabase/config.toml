@@ -1,4 +1,18 @@
 project_id = "vhzzugeeadaijkzrvowx"
 
+[auth]
+site_url = "https://sharvaos-pulse.vercel.app"
+additional_redirect_urls = ["https://sharvaos-pulse.vercel.app"]
+
+[auth.external.google]
+enabled = true
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_SECRET)"
+skip_nonce_check = false
+
+[auth.hook.before_user_created]
+enabled = true
+uri = "pg-functions://postgres/public/hook_reject_new_pulse_users"
+
 [functions.sharvaos-pulse-sync]
 verify_jwt = true
