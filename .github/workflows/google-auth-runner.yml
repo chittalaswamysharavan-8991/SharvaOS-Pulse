@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - phase5/google-auth
-    paths:
-      - .google-auth-runner-trigger
 
 permissions:
   contents: write
