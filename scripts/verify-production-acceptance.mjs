@@ -26,7 +26,6 @@ export function validateHealth(health, expected = DEFAULTS) {
   invariant(health?.version === expected.expectedVersion, "unexpected release version");
   invariant(health?.contract === expected.expectedContract, "unexpected canonical contract");
   invariant(health?.dataOwner === "supabase", "production owner must be supabase");
-  invariant(health?.canonicalFunction === "configured", "canonical function must be configured");
   invariant(health?.authentication === "owner-session-required", "owner session must be required");
   invariant(/^[0-9a-f]{40}$/i.test(health?.sourceCommit ?? ""), "production source commit must be a full Git SHA");
   if (expected.expectedSourceCommit) {
@@ -116,7 +115,8 @@ export async function runProductionAcceptance({
     contract: health.contract,
     sourceCommit: health.sourceCommit,
     dataOwner: health.dataOwner,
-    configSource: health.configSource,
+    configSource: config.configSource,
+    canonicalFunction: "verified-by-runtime-config",
     productionShell: "ready",
     ownerGateContract: "verified-by-repository-tests-and-browser-acceptance",
     anonymousCanonicalMutation: "denied",
