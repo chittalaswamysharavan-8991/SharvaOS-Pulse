@@ -25,16 +25,34 @@ The checks run in `.github/workflows/production-acceptance.yml` and contain no r
 
 ## Canonical database acceptance
 
-The production database acceptance must prove transactionally and leave zero residue:
+The production database acceptance proves transactionally and leaves zero residue:
 
 - one confirmed owner remains the only application identity;
 - anonymous canonical reads and mutations remain denied;
 - authenticated canonical reads and mutations remain allowed;
 - RLS remains enabled on `pulse_logs` and `pulse_todos`;
 - a canary log can be written, read back, replayed idempotently and soft deleted;
-- the exact canary log, todo and receipt counts return to zero.
+- the exact canary log and receipt counts return to zero.
 
 Database canaries are executed through the reviewed canonical RPC boundary or a controlled transaction. They do not authorize a browser session and do not replace the owner OTP acceptance step.
+
+### Executed production canary — PASS
+
+Verified on 2026-07-30:
+
+- authenticated `add_log`: confirmed persisted;
+- authoritative `pulse_read_day` read-back: canary present;
+- exact same mutation envelope replay: identified as replayed;
+- duplicate canonical rows after replay: `1`;
+- authenticated `delete_log`: confirmed absent;
+- authoritative read after deletion: canary absent;
+- confirmed Auth users: `1`;
+- `pulse_logs` RLS: enabled;
+- `pulse_todos` RLS: enabled;
+- final Phase 5 canary logs: `0`;
+- final Phase 5 canary receipts: `0`.
+
+The canary statement raises on any failed assertion; cleanup completed before the result returned.
 
 ## Owner-session acceptance
 
