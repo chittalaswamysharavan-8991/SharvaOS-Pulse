@@ -117,7 +117,7 @@ jobs:
                   '',
                   '- deploy-default Supabase canonical owner',
                   '- existing-owner OTP/JWT/RLS enforcement',
-                  '- explicit D1 rollback',
+                  '- D1 rollback is binding-gated and fails closed off Cloudflare',
                   '- fail-closed invalid owner handling',
                   '- safe /api/health diagnostics',
                   '- immutable v2.0.0 baseline preserved',
