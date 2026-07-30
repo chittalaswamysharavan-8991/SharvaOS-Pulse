@@ -5,24 +5,194 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
+  issues: write
 
 jobs:
-  verify:
+  baseline-protection:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'phase1/v2.1-reliability-hardening'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BASELINE_COMMIT: 43c9c2caa237e326e08671606d4b3b5aa117e5ec
+      BASELINE_TAG: v2.0.0-baseline
+    steps:
+      - name: Checkout pull-request branch with history
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify baseline source
+        shell: bash
+        run: |
+          git fetch origin main --force
+          git cat-file -e "${BASELINE_COMMIT}^{commit}"
+          test "$(git rev-parse origin/main)" = "${BASELINE_COMMIT}"
+          grep -F "${BASELINE_COMMIT}" .github/baseline-freeze-request
+          grep -F "424f549ad660febe9e2f518736ddfb1e728f87d61654c439d6ede5223807072e" SOURCE_PROVENANCE.md
+
+      - name: Create immutable baseline release
+        shell: bash
+        run: |
+          if gh release view "${BASELINE_TAG}" >/dev/null 2>&1; then
+            echo "Release ${BASELINE_TAG} already exists."
+          else
+            gh release create "${BASELINE_TAG}" \
+              --target "${BASELINE_COMMIT}" \
+              --title "SharvaOS Pulse v2.0.0 Baseline" \
+              --notes "Immutable pre-behaviour-change baseline. Source ZIP SHA-256: 424f549ad660febe9e2f518736ddfb1e728f87d61654c439d6ede5223807072e. Verified install -> lint -> typecheck -> build -> test before Phase 1 reliability hardening."
+          fi
+          git fetch --tags --force
+          test "$(git rev-list -n 1 "${BASELINE_TAG}")" = "${BASELINE_COMMIT}"
+
+      - name: Attempt main branch protection
+        id: protection
+        continue-on-error: true
+        shell: bash
+        run: |
+          cat > /tmp/protection.json <<'JSON'
+          {
+            "required_status_checks": {"strict": true, "contexts": ["verify"]},
+            "enforce_admins": true,
+            "required_pull_request_reviews": {
+              "dismiss_stale_reviews": false,
+              "require_code_owner_reviews": false,
+              "required_approving_review_count": 0
+            },
+            "restrictions": null,
+            "required_linear_history": true,
+            "allow_force_pushes": false,
+            "allow_deletions": false,
+            "block_creations": false,
+            "required_conversation_resolution": true,
+            "lock_branch": false,
+            "allow_fork_syncing": false
+          }
+          JSON
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/branches/main/protection" --input /tmp/protection.json
+
+      - name: Record protection evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p verification
+          {
+            echo "baseline_tag=${BASELINE_TAG}"
+            echo "baseline_commit=${BASELINE_COMMIT}"
+            echo "zip_sha256=424f549ad660febe9e2f518736ddfb1e728f87d61654c439d6ede5223807072e"
+            echo "branch_protection_outcome=${{ steps.protection.outcome }}"
+            echo "run_id=${GITHUB_RUN_ID}"
+          } > verification/baseline-protection-evidence.txt
+
+      - name: Open blocker when branch protection is denied
+        if: steps.protection.outcome != 'success'
+        shell: bash
+        run: |
+          existing="$(gh issue list --state open --search 'Main branch protection requires admin-capable token in:title' --json number --jq '.[0].number // empty')"
+          if [[ -z "${existing}" ]]; then
+            gh issue create \
+              --title "P0: Main branch protection requires admin-capable token" \
+              --body "The v2.0.0 baseline release was frozen successfully, but GitHub's repository-scoped Actions token was denied access to the branch-protection administration endpoint. Until an owner applies the documented main-branch rule, use PR-only changes and do not push directly to main. Evidence: Actions run ${GITHUB_RUN_ID}." \
+              --label security || gh issue create \
+              --title "P0: Main branch protection requires admin-capable token" \
+              --body "The v2.0.0 baseline release was frozen successfully, but GitHub's repository-scoped Actions token was denied access to the branch-protection administration endpoint. Until an owner applies the documented main-branch rule, use PR-only changes and do not push directly to main. Evidence: Actions run ${GITHUB_RUN_ID}."
+          fi
+
+      - name: Upload baseline evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sharvaos-pulse-baseline-protection
+          path: verification/baseline-protection-evidence.txt
+
+  prepare-v21-lock:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'phase1/v2.1-reliability-hardening'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
     steps:
       - name: Checkout pull-request branch
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          persist-credentials: true
 
-      - name: Detect completed bootstrap
+      - name: Detect lock refresh request
         id: detect
         shell: bash
         run: |
-          if [[ -d .bootstrap ]]; then
+          if [[ -f .v2.1-lock-refresh ]]; then
+            echo "required=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "required=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node
+        if: steps.detect.outputs.required == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+
+      - name: Generate normalized v2.1 lockfile
+        if: steps.detect.outputs.required == 'true'
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Verify v2.1 lockfile
+        if: steps.detect.outputs.required == 'true'
+        run: node -e "const p=require('./package.json'); const l=require('./package-lock.json'); if (p.version !== '2.1.0' || l.version !== '2.1.0' || l.packages[''].version !== '2.1.0') process.exit(1)"
+
+      - name: Install
+        if: steps.detect.outputs.required == 'true'
+        run: npm ci
+
+      - name: Lint
+        if: steps.detect.outputs.required == 'true'
+        run: npm run lint
+
+      - name: Typecheck
+        if: steps.detect.outputs.required == 'true'
+        run: npm run typecheck
+
+      - name: Build
+        if: steps.detect.outputs.required == 'true'
+        run: npm run build
+
+      - name: Test
+        if: steps.detect.outputs.required == 'true'
+        run: npm test
+
+      - name: Commit normalized lockfile
+        if: steps.detect.outputs.required == 'true'
+        shell: bash
+        run: |
+          rm .v2.1-lock-refresh
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json .v2.1-lock-refresh
+          git commit -m "chore: normalize v2.1 lockfile"
+          git push
+
+  verify:
+    needs: [prepare-v21-lock]
+    if: always() && needs.prepare-v21-lock.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout pull-request branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect completed preparation
+        id: detect
+        shell: bash
+        run: |
+          if [[ -f .v2.1-lock-refresh ]]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Import bootstrap must complete before final CI."
+            echo "The normalized lockfile commit is being prepared."
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
@@ -35,13 +205,15 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Verify source provenance
+      - name: Verify immutable source baseline
         if: steps.detect.outputs.ready == 'true'
         shell: bash
         run: |
+          git fetch --tags --force
+          test "$(git rev-list -n 1 v2.0.0-baseline)" = "43c9c2caa237e326e08671606d4b3b5aa117e5ec"
           grep -F "424f549ad660febe9e2f518736ddfb1e728f87d61654c439d6ede5223807072e" SOURCE_PROVENANCE.md
-          echo "25dbbe927d77520bea38827a43bded750c8cfa6bec38b7059d1f236eeeeea55c  app/page.tsx" | sha256sum -c -
-          echo "ca822bb74d7131dc39b84c0ce1cc3efbff28ecb3422ec36e2f2aefe79ed5f78d  app/globals.css" | sha256sum -c -
+          test "$(git show v2.0.0-baseline:app/page.tsx | sha256sum | cut -d' ' -f1)" = "25dbbe927d77520bea38827a43bded750c8cfa6bec38b7059d1f236eeeeea55c"
+          test "$(git show v2.0.0-baseline:app/globals.css | sha256sum | cut -d' ' -f1)" = "ca822bb74d7131dc39b84c0ce1cc3efbff28ecb3422ec36e2f2aefe79ed5f78d"
 
       - name: Install
         if: steps.detect.outputs.ready == 'true'
@@ -73,6 +245,8 @@ jobs:
             echo "run_id=${GITHUB_RUN_ID}"
             echo "node=$(node --version)"
             echo "npm=$(npm --version)"
+            echo "version=$(node -p \"require('./package.json').version\")"
+            echo "baseline_commit=43c9c2caa237e326e08671606d4b3b5aa117e5ec"
             echo "zip_sha256=424f549ad660febe9e2f518736ddfb1e728f87d61654c439d6ede5223807072e"
           } > verification/ci-evidence.txt
 
@@ -80,5 +254,5 @@ jobs:
         if: always() && steps.detect.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: sharvaos-pulse-pr-ci-evidence
+          name: sharvaos-pulse-v21-pr-ci-evidence
           path: verification/ci-evidence.txt
