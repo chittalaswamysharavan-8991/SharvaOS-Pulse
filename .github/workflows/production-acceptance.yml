@@ -6,6 +6,8 @@ on:
       - "scripts/verify-production-acceptance.mjs"
       - "tests/phase5-production-acceptance.test.mjs"
       - "docs/PHASE5-PRODUCTION-ACCEPTANCE.md"
+      - "docs/GOOGLE-AUTH-CUTOVER.md"
+      - "docs/GOOGLE-AUTH-EVIDENCE.md"
       - ".github/workflows/production-acceptance.yml"
   push:
     branches:
@@ -14,6 +16,8 @@ on:
       - "scripts/verify-production-acceptance.mjs"
       - "tests/phase5-production-acceptance.test.mjs"
       - "docs/PHASE5-PRODUCTION-ACCEPTANCE.md"
+      - "docs/GOOGLE-AUTH-CUTOVER.md"
+      - "docs/GOOGLE-AUTH-EVIDENCE.md"
       - ".github/workflows/production-acceptance.yml"
   workflow_dispatch:
 
@@ -39,10 +43,10 @@ jobs:
 
       - name: Verify live production contract
         env:
-          SHARVAOS_PULSE_PRODUCTION_URL: https://sharvaos-pulse.vercel.app
+          SHARVAOS_PULSE_PRODUCTION_URL: https://sharvaos-pulse-google.vercel.app
           EXPECTED_VERSION: 2.2.0
           EXPECTED_CONTRACT: sharvaos.pulse.v1
-          EXPECTED_SOURCE_COMMIT: af1cee26053ce4027bf87e8154473d5edcf04d2d
+          EXPECTED_SOURCE_COMMIT: 748ecee2b36dbf40bd990ac0d3fd4aa6a90d02f2
         run: node scripts/verify-production-acceptance.mjs
 
       - name: Upload acceptance evidence
