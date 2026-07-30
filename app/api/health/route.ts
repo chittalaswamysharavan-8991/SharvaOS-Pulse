@@ -21,6 +21,11 @@ async function readRuntimeValues() {
 export async function GET() {
   const config = resolvePulseRuntimeValues(await readRuntimeValues());
   const ready = config.cutoverReady && config.dataOwner !== "blocked";
+  const authentication = config.dataOwner === "supabase"
+    ? "owner-session-required"
+    : config.dataOwner === "d1"
+      ? "platform-identity"
+      : "blocked";
   return Response.json({
     status: ready ? "ready" : "blocked",
     version: PULSE_RELEASE_VERSION,
@@ -29,8 +34,8 @@ export async function GET() {
     dataOwner: config.dataOwner,
     configSource: config.configSource,
     canonicalFunction: config.supabase ? "configured" : "not-configured",
-    authentication: config.dataOwner === "supabase" ? "owner-session-required" : "platform-identity",
-    rollback: "Set SHARVAOS_PULSE_DATA_OWNER=d1 and redeploy",
+    authentication,
+    rollback: "D1 rollback requires SHARVAOS_PULSE_DATA_OWNER=d1 and a live Cloudflare DB binding on the same release",
     reason: config.reason ?? null,
   }, {
     status: ready ? 200 : 503,
