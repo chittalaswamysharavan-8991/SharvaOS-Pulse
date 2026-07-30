@@ -11,6 +11,7 @@
 - Stable offline queue idempotency mapping: implemented
 - Auth-expiry queue preservation: implemented
 - Local contract tests: PASS
+- Default deployment behavior: D1 rollback remains active until the explicit Supabase owner flag and complete environment are present
 - Production activation: BLOCKED by repository privacy and deployment environment gates
 
 ## Auth readiness
