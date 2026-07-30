@@ -11,6 +11,8 @@
 - Stable offline queue idempotency mapping: implemented
 - Auth-expiry queue preservation: implemented
 - Nested runtime load effect captures a verified non-null transport before asynchronous work
+- Partial canonical days reconcile missing device logs and tasks by ID or deterministic fingerprint
+- Canonical initial import is split into bounded 100-item batches without silent truncation
 - Local contract tests: PASS
 - Default deployment behavior: D1 rollback remains active until the explicit Supabase owner flag and complete environment are present
 - Production activation: BLOCKED by repository privacy and deployment environment gates
@@ -33,6 +35,9 @@ The Phase 3 test suite proves:
 - complete config selects the canonical transport;
 - stable queue IDs become canonical idempotency keys;
 - separate intentional task toggles do not collide;
+- an existing canonical water row cannot block migration of missing device smoke, food or task entries;
+- equivalent entries are skipped by ID or exact source fingerprint to prevent duplicates;
+- more than 100 local entries are imported in unique bounded batches;
 - D1 remains an explicit rollback transport;
 - no live publishable key, JWT or service-role key is committed.
 
