@@ -26,32 +26,41 @@ jobs:
           const path = 'app/page.tsx';
           let source = fs.readFileSync(path, 'utf8');
 
-          const anchor = '    if (!runtimeReady || !transport) return;\n    let active = true;';
-          if (!source.includes(anchor)) throw new Error('transport anchor not found');
-          source = source.replace(anchor, '    if (!runtimeReady || !transport) return;\n    const activeTransport = transport;\n    let active = true;');
+          const startNeedle = '  useEffect(() => {\n    const transport = transportRef.current;\n    if (!runtimeReady || !transport) return;';
+          const endNeedle = '  }, [date, flushPending, pendingKey, requireSignIn, runtimeReady, storageKey, transportVersion]);';
+          const start = source.indexOf(startNeedle);
+          const end = source.indexOf(endNeedle, start);
+          if (start < 0 || end < 0) throw new Error('load effect boundary not found');
 
-          function replaceSecond(needle, replacement) {
-            const first = source.indexOf(needle);
-            const second = source.indexOf(needle, first + needle.length);
-            if (first < 0 || second < 0 || source.indexOf(needle, second + needle.length) >= 0) {
-              throw new Error(`expected exactly two occurrences: ${needle}`);
-            }
-            source = source.slice(0, second) + replacement + source.slice(second + needle.length);
-          }
-
-          replaceSecond(
+          let block = source.slice(start, end + endNeedle.length);
+          block = block.replace(
+            '    if (!runtimeReady || !transport) return;\n    let active = true;',
+            '    if (!runtimeReady || !transport) return;\n    const activeTransport = transport;\n    let active = true;',
+          );
+          block = block.replace(
             'const remote = await transport.readDay(date) as DayState;',
             'const remote = await activeTransport.readDay(date) as DayState;',
           );
-          const importNeedle = 'nextDay = await transport.importDay(date, cached, `device-initial:${date}`) as DayState;';
-          if ((source.match(/nextDay = await transport\.importDay/g) || []).length !== 1) throw new Error('import target count mismatch');
-          source = source.replace(importNeedle, 'nextDay = await activeTransport.importDay(date, cached, `device-initial:${date}`) as DayState;');
-          replaceSecond(
+          block = block.replace(
+            'nextDay = await transport.importDay(date, cached, `device-initial:${date}`) as DayState;',
+            'nextDay = await activeTransport.importDay(date, cached, `device-initial:${date}`) as DayState;',
+          );
+          block = block.replace(
             'if (transport.owner === "supabase" && errorStatus(error) === 401) {',
             'if (activeTransport.owner === "supabase" && errorStatus(error) === 401) {',
           );
 
-          if (!source.includes('const activeTransport = transport;')) throw new Error('fix not applied');
+          for (const expected of [
+            'const activeTransport = transport;',
+            'activeTransport.readDay(date)',
+            'activeTransport.importDay(date, cached',
+            'activeTransport.owner === "supabase"',
+          ]) if (!block.includes(expected)) throw new Error(`fix marker missing: ${expected}`);
+          if (block.includes('await transport.readDay(date)') || block.includes('await transport.importDay(date, cached') || block.includes('if (transport.owner === "supabase"')) {
+            throw new Error('nullable transport reference remains in load effect');
+          }
+
+          source = source.slice(0, start) + block + source.slice(end + endNeedle.length);
           fs.writeFileSync(path, source);
           NODE
           git diff --check
