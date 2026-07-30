@@ -1,0 +1,117 @@
+name: Package Google Auth Deployment
+
+on:
+  push:
+    branches:
+      - deploy/google-auth-package
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 748ecee2b36dbf40bd990ac0d3fd4aa6a90d02f2
+
+      - name: Assemble Vercel source
+        run: |
+          mkdir -p deploy-source/app/api/health deploy-source/app/api/runtime-config deploy-source/lib deploy-source/public
+          cp app/page.tsx app/layout.tsx app/globals.css deploy-source/app/
+          cp app/api/runtime-config/route.ts deploy-source/app/api/runtime-config/route.ts
+          cp lib/pulse-auth-client.mjs lib/pulse-auth-client.d.mts deploy-source/lib/
+          cp lib/pulse-canonical-client.mjs lib/pulse-canonical-client.d.mts deploy-source/lib/
+          cp lib/pulse-runtime-config.mjs lib/pulse-runtime-config.d.mts deploy-source/lib/
+          cp lib/pulse-transport.mjs lib/pulse-transport.d.mts deploy-source/lib/
+          cp lib/pulse-reliability.mjs lib/pulse-reliability.d.mts deploy-source/lib/
+          cp lib/pulse-public-runtime.mjs lib/pulse-public-runtime.d.mts deploy-source/lib/
+          cp public/favicon.svg deploy-source/public/favicon.svg
+          cat > deploy-source/app/api/health/route.ts <<'EOF'
+          import { NextResponse } from "next/server";
+          import { resolvePulsePublicRuntime } from "../../../lib/pulse-public-runtime.mjs";
+
+          export const dynamic = "force-dynamic";
+          const SOURCE_COMMIT = "748ecee2b36dbf40bd990ac0d3fd4aa6a90d02f2";
+
+          export async function GET() {
+            const runtime = resolvePulsePublicRuntime(process.env);
+            const ready = runtime.dataOwner !== "blocked";
+            return NextResponse.json({
+              status: ready ? "ready" : "blocked",
+              version: "2.2.0",
+              contract: "sharvaos.pulse.v1",
+              requestedOwner: runtime.requestedOwner,
+              dataOwner: runtime.dataOwner,
+              configSource: runtime.configSource,
+              canonicalFunction: runtime.dataOwner === "supabase" ? "configured" : "not-selected",
+              authentication: runtime.dataOwner === "supabase" ? "owner-session-required" : "d1-session-required",
+              rollback: "Set SHARVAOS_PULSE_DATA_OWNER=d1 and redeploy",
+              reason: runtime.reason,
+              sourceCommit: SOURCE_COMMIT,
+            }, {
+              status: ready ? 200 : 503,
+              headers: { "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff" },
+            });
+          }
+          EOF
+          cat > deploy-source/package.json <<'EOF'
+          {
+            "name": "sharvaos-pulse",
+            "version": "2.2.0",
+            "private": true,
+            "scripts": { "build": "next build" },
+            "dependencies": {
+              "next": "16.2.6",
+              "react": "19.2.6",
+              "react-dom": "19.2.6",
+              "tailwindcss": "4.2.1",
+              "@tailwindcss/postcss": "4.2.1"
+            },
+            "devDependencies": {
+              "@types/node": "22.19.19",
+              "@types/react": "19.2.14",
+              "@types/react-dom": "19.2.3",
+              "typescript": "5.9.3"
+            }
+          }
+          EOF
+          cat > deploy-source/tsconfig.json <<'EOF'
+          {
+            "compilerOptions": {
+              "target": "ES2017",
+              "lib": ["dom", "dom.iterable", "esnext"],
+              "allowJs": true,
+              "skipLibCheck": true,
+              "strict": true,
+              "noEmit": true,
+              "esModuleInterop": true,
+              "module": "esnext",
+              "moduleResolution": "bundler",
+              "resolveJsonModule": true,
+              "isolatedModules": true,
+              "jsx": "react-jsx",
+              "incremental": true,
+              "plugins": [{ "name": "next" }]
+            },
+            "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+            "exclude": ["node_modules"]
+          }
+          EOF
+          cat > deploy-source/postcss.config.mjs <<'EOF'
+          export default { plugins: { "@tailwindcss/postcss": {} } };
+          EOF
+          cat > deploy-source/next-env.d.ts <<'EOF'
+          /// <reference types="next" />
+          /// <reference types="next/image-types/global" />
+          EOF
+          cd deploy-source
+          zip -qr ../sharvaos-pulse-google-auth-source.zip .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sharvaos-pulse-google-auth-source
+          path: sharvaos-pulse-google-auth-source.zip
+          if-no-files-found: error
