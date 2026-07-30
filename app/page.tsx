@@ -84,6 +84,8 @@ export default function Home() {
   const [authEmail, setAuthEmail] = useState("");
   const [authCode, setAuthCode] = useState("");
   const [authMessage, setAuthMessage] = useState("");
+  const [googleEnabled, setGoogleEnabled] = useState(false);
+  const [useEmailRecovery, setUseEmailRecovery] = useState(false);
   const [syncState, setSyncState] = useState<"syncing" | "synced" | "offline">("syncing");
   const [activeCapture, setActiveCapture] = useState<LogKind>("water");
   const [foodText, setFoodText] = useState("");
@@ -137,6 +139,10 @@ export default function Home() {
           const status = errorStatus(error);
           if (transport.owner === "supabase" && status === 401) {
             requireSignIn();
+            return;
+          }
+          if (transport.owner === "supabase" && status === 403) {
+            requireSignIn("This Google account is not the registered Pulse owner.");
             return;
           }
           if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
@@ -199,7 +205,15 @@ export default function Home() {
         canonicalTransportRef.current = canonical;
         setDataOwner("supabase");
         setRuntimeNotice("");
-        const session = await auth.restoreSession().catch(() => null);
+        const providerReady = await auth.isGoogleEnabled().catch(() => false);
+        setGoogleEnabled(providerReady);
+        let session = null;
+        try {
+          session = await auth.captureOAuthSession();
+        } catch (error) {
+          setAuthMessage(errorMessage(error, "Google sign-in could not be completed"));
+        }
+        if (!session) session = await auth.restoreSession().catch(() => null);
         if (!active) return;
         if (session) {
           transportRef.current = canonical;
@@ -274,6 +288,8 @@ export default function Home() {
       } catch (error) {
         if (activeTransport.owner === "supabase" && errorStatus(error) === 401) {
           requireSignIn();
+        } else if (activeTransport.owner === "supabase" && errorStatus(error) === 403) {
+          requireSignIn("This Google account is not the registered Pulse owner.");
         } else if (active) {
           setSyncState("offline");
         }
@@ -306,6 +322,19 @@ export default function Home() {
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, []);
+
+  function signInWithGoogle() {
+    const auth = authClientRef.current;
+    if (!auth) return;
+    setAuthPhase("sending");
+    setAuthMessage("");
+    try {
+      auth.beginGoogleSignIn({ redirectTo: window.location.origin });
+    } catch (error) {
+      setAuthPhase("required");
+      setAuthMessage(errorMessage(error, "Google sign-in could not start"));
+    }
+  }
 
   async function requestOtp(event: FormEvent) {
     event.preventDefault();
@@ -350,6 +379,7 @@ export default function Home() {
     await authClientRef.current?.signOut();
     transportRef.current = null;
     setAuthCode("");
+    setUseEmailRecovery(false);
     setAuthPhase("required");
     setAuthMessage("Signed out. Device cache and pending changes remain on this device.");
     setSyncState("offline");
@@ -452,51 +482,66 @@ export default function Home() {
   if (dataOwner === "supabase" && authPhase !== "signed-in") {
     const verifying = authPhase === "verify";
     const busy = authPhase === "sending";
+    const recoveryActive = verifying || useEmailRecovery || !googleEnabled;
     return (
       <main className="app-shell" style={{ display: "grid", minHeight: "100vh", placeItems: "center" }}>
         <div className="ambient ambient-one" /><div className="ambient ambient-two" />
         <section className="panel" style={{ maxWidth: 520, width: "100%", position: "relative", zIndex: 1 }}>
-          <div className="brand" style={{ marginBottom: 28 }}><div className="brand-mark">S</div><div><p className="eyebrow">SUPABASE CANONICAL</p><h1 style={{ margin: 0 }}>Daily Pulse</h1></div></div>
-          <h2>{verifying ? "Enter your sign-in code" : "Sign in to your private Pulse"}</h2>
-          <p style={{ color: "var(--muted)", lineHeight: 1.6 }}>
-            {verifying ? "Use the six-digit code sent to the registered owner email." : "Only the existing confirmed owner account can sign in. New accounts are never created from this screen."}
-          </p>
-          <form onSubmit={verifying ? verifyOtp : requestOtp} style={{ display: "grid", gap: 12, marginTop: 24 }}>
-            <input
-              aria-label="Owner email"
-              autoComplete="email"
-              disabled={verifying || busy}
-              inputMode="email"
-              onChange={(event) => setAuthEmail(event.target.value)}
-              placeholder="Registered owner email"
-              required
-              style={{ background: "rgba(0,0,0,.28)", border: "1px solid var(--line)", borderRadius: 14, color: "var(--ink)", minHeight: 50, padding: "0 15px" }}
-              type="email"
-              value={authEmail}
-            />
-            {verifying && <input
-              aria-label="Six-digit code"
-              autoComplete="one-time-code"
-              autoFocus
-              inputMode="numeric"
-              maxLength={6}
-              onChange={(event) => setAuthCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
-              pattern="[0-9]{6}"
-              placeholder="6-digit code"
-              required
-              style={{ background: "rgba(0,0,0,.28)", border: "1px solid var(--line)", borderRadius: 14, color: "var(--ink)", fontSize: 22, letterSpacing: 8, minHeight: 54, padding: "0 15px" }}
-              value={authCode}
-            />}
-            <button
-              className="primary-action"
-              disabled={busy || (verifying ? authCode.length !== 6 : !authEmail.trim())}
-              style={{ border: 0, borderRadius: 14, cursor: "pointer", minHeight: 50 }}
-              type="submit"
-            >{busy ? "Please wait…" : verifying ? "Verify and sync" : "Send sign-in code"}</button>
-          </form>
-          {verifying && <button onClick={() => { setAuthPhase("required"); setAuthCode(""); setAuthMessage(""); }} style={{ background: "transparent", border: 0, color: "var(--muted)", cursor: "pointer", marginTop: 14 }} type="button">Use another email</button>}
-          {authMessage && <p role="status" style={{ color: "var(--acid)", marginTop: 18 }}>{authMessage}</p>}
-          <p style={{ borderTop: "1px solid var(--line)", color: "var(--muted)", fontSize: 13, marginTop: 28, paddingTop: 18 }}>Offline entries and queued changes remain on this device until authentication succeeds.</p>
+<div className="brand" style={{ marginBottom: 28 }}><div className="brand-mark">S</div><div><p className="eyebrow">SUPABASE CANONICAL</p><h1 style={{ margin: 0 }}>Daily Pulse</h1></div></div>
+<h2>{verifying ? "Enter your recovery code" : recoveryActive ? "Owner sign-in" : "Sign in with Google"}</h2>
+<p style={{ color: "var(--muted)", lineHeight: 1.6 }}>
+  {verifying
+    ? "Use the six-digit code sent to the registered owner email."
+    : "Only the existing confirmed owner account can access Pulse. New Supabase users are blocked."}
+</p>
+
+{!recoveryActive && <button
+  className="primary-action"
+  disabled={busy}
+  onClick={signInWithGoogle}
+  style={{ alignItems: "center", border: 0, borderRadius: 14, cursor: "pointer", display: "flex", gap: 12, justifyContent: "center", marginTop: 24, minHeight: 52, width: "100%" }}
+  type="button"
+><span aria-hidden="true" style={{ background: "white", borderRadius: 999, color: "#202124", display: "grid", fontWeight: 800, height: 24, placeItems: "center", width: 24 }}>G</span>{busy ? "Opening Google…" : "Continue with Google"}</button>}
+
+{recoveryActive && <form onSubmit={verifying ? verifyOtp : requestOtp} style={{ display: "grid", gap: 12, marginTop: 24 }}>
+  <input
+    aria-label="Owner email"
+    autoComplete="email"
+    disabled={verifying || busy}
+    inputMode="email"
+    onChange={(event) => setAuthEmail(event.target.value)}
+    placeholder="Registered owner email"
+    required
+    style={{ background: "rgba(0,0,0,.28)", border: "1px solid var(--line)", borderRadius: 14, color: "var(--ink)", minHeight: 50, padding: "0 15px" }}
+    type="email"
+    value={authEmail}
+  />
+  {verifying && <input
+    aria-label="Six-digit recovery code"
+    autoComplete="one-time-code"
+    autoFocus
+    inputMode="numeric"
+    maxLength={6}
+    onChange={(event) => setAuthCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+    pattern="[0-9]{6}"
+    placeholder="6-digit code"
+    required
+    style={{ background: "rgba(0,0,0,.28)", border: "1px solid var(--line)", borderRadius: 14, color: "var(--ink)", fontSize: 22, letterSpacing: 8, minHeight: 54, padding: "0 15px" }}
+    value={authCode}
+  />}
+  <button
+    className="primary-action"
+    disabled={busy || (verifying ? authCode.length !== 6 : !authEmail.trim())}
+    style={{ border: 0, borderRadius: 14, cursor: "pointer", minHeight: 50 }}
+    type="submit"
+  >{busy ? "Please wait…" : verifying ? "Verify and sync" : "Send recovery code"}</button>
+</form>}
+
+{!verifying && googleEnabled && <button onClick={() => { setUseEmailRecovery((value) => !value); setAuthMessage(""); }} style={{ background: "transparent", border: 0, color: "var(--muted)", cursor: "pointer", marginTop: 14 }} type="button">{useEmailRecovery ? "Back to Google Sign-In" : "Use email code recovery"}</button>}
+{verifying && <button onClick={() => { setAuthPhase("required"); setAuthCode(""); setAuthMessage(""); setUseEmailRecovery(true); }} style={{ background: "transparent", border: 0, color: "var(--muted)", cursor: "pointer", marginTop: 14 }} type="button">Use another email</button>}
+{!googleEnabled && <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 16 }}>Google Sign-In will appear automatically after the Supabase Google provider is activated. Email recovery remains owner-only.</p>}
+{authMessage && <p role="status" style={{ color: "var(--acid)", marginTop: 18 }}>{authMessage}</p>}
+<p style={{ borderTop: "1px solid var(--line)", color: "var(--muted)", fontSize: 13, marginTop: 28, paddingTop: 18 }}>Offline entries and queued changes remain on this device until authentication succeeds.</p>
         </section>
       </main>
     );

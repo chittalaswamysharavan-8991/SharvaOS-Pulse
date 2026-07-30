@@ -19,7 +19,13 @@ export function createPulseAuthClient(input: {
   fetchImpl?: typeof fetch;
   storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">;
   storageKey?: string;
+  location?: Pick<Location, "origin" | "href" | "assign">;
+  history?: Pick<History, "replaceState">;
 }): {
+  isGoogleEnabled(): Promise<boolean>;
+  getGoogleAuthorizeUrl(input?: { redirectTo?: string }): string;
+  beginGoogleSignIn(input?: { redirectTo?: string }): string;
+  captureOAuthSession(url?: string): Promise<PulseSession | null>;
   requestOtp(email: string): Promise<{ email: string }>;
   verifyOtp(input: { email: string; token: string }): Promise<PulseSession>;
   restoreSession(): Promise<PulseSession | null>;
