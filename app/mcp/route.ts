@@ -2,10 +2,12 @@ import { and, desc, eq } from "drizzle-orm";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { ensureSchema, getDb } from "../../db";
+import { getDb } from "../../db";
 import { dailyLogs, dailyTodos } from "../../db/schema";
 
 export const runtime = "edge";
+
+type Db = Awaited<ReturnType<typeof getDb>>;
 
 function todayInIndia() {
   return new Intl.DateTimeFormat("en-CA", {
@@ -32,9 +34,27 @@ function textResult(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
 }
 
+async function readLog(db: Db, userKey: string, date: string, id: string) {
+  const [record] = await db.select().from(dailyLogs).where(and(
+    eq(dailyLogs.id, id),
+    eq(dailyLogs.userKey, userKey),
+    eq(dailyLogs.logDate, date),
+  ));
+  return record;
+}
+
+async function readTodo(db: Db, userKey: string, date: string, id: string) {
+  const [record] = await db.select().from(dailyTodos).where(and(
+    eq(dailyTodos.id, id),
+    eq(dailyTodos.userKey, userKey),
+    eq(dailyTodos.taskDate, date),
+  ));
+  return record;
+}
+
 function buildServer(userKey: string) {
   const server = new McpServer(
-    { name: "SharvaOS Daily Pulse", version: "2.0.0" },
+    { name: "SharvaOS Daily Pulse", version: "2.1.0" },
     { capabilities: { tools: {} } },
   );
 
@@ -71,13 +91,19 @@ function buildServer(userKey: string) {
     annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
   }, async ({ amountMl, idempotencyKey }) => {
     const now = Date.now();
+    const date = todayInIndia();
     const id = idempotencyKey ?? crypto.randomUUID();
-    await (await getDb()).insert(dailyLogs).values({
-      id, userKey, logDate: todayInIndia(), kind: "water",
+    const db = await getDb();
+    await db.insert(dailyLogs).values({
+      id, userKey, logDate: date, kind: "water",
       label: `${amountMl} ml water`, detail: "Hydration", amount: amountMl,
       loggedAt: now, source: "chatgpt",
     }).onConflictDoNothing();
-    return textResult({ ok: true, id, amountMl, loggedAt: now });
+    const record = await readLog(db, userKey, date, id);
+    if (!record || record.amount !== amountMl || record.kind !== "water") {
+      throw new Error("Water write could not be confirmed or the idempotency key conflicts.");
+    }
+    return textResult({ ok: true, confirmation: { confirmed: true, state: "persisted", record } });
   });
 
   server.registerTool("log_smoke", {
@@ -87,12 +113,18 @@ function buildServer(userKey: string) {
     annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
   }, async ({ idempotencyKey }) => {
     const now = Date.now();
+    const date = todayInIndia();
     const id = idempotencyKey ?? crypto.randomUUID();
-    await (await getDb()).insert(dailyLogs).values({
-      id, userKey, logDate: todayInIndia(), kind: "smoke",
+    const db = await getDb();
+    await db.insert(dailyLogs).values({
+      id, userKey, logDate: date, kind: "smoke",
       label: "Smoke", detail: "Logged via ChatGPT", loggedAt: now, source: "chatgpt",
     }).onConflictDoNothing();
-    return textResult({ ok: true, id, loggedAt: now });
+    const record = await readLog(db, userKey, date, id);
+    if (!record || record.kind !== "smoke") {
+      throw new Error("Smoke write could not be confirmed or the idempotency key conflicts.");
+    }
+    return textResult({ ok: true, confirmation: { confirmed: true, state: "persisted", record } });
   });
 
   server.registerTool("log_food", {
@@ -106,12 +138,19 @@ function buildServer(userKey: string) {
     annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
   }, async ({ description, mealType, idempotencyKey }) => {
     const now = Date.now();
+    const date = todayInIndia();
     const id = idempotencyKey ?? crypto.randomUUID();
-    await (await getDb()).insert(dailyLogs).values({
-      id, userKey, logDate: todayInIndia(), kind: "food",
-      label: description.trim(), detail: mealType, loggedAt: now, source: "chatgpt",
+    const label = description.trim();
+    const db = await getDb();
+    await db.insert(dailyLogs).values({
+      id, userKey, logDate: date, kind: "food",
+      label, detail: mealType, loggedAt: now, source: "chatgpt",
     }).onConflictDoNothing();
-    return textResult({ ok: true, id, description, mealType, loggedAt: now });
+    const record = await readLog(db, userKey, date, id);
+    if (!record || record.kind !== "food" || record.label !== label || record.detail !== mealType) {
+      throw new Error("Food write could not be confirmed or the idempotency key conflicts.");
+    }
+    return textResult({ ok: true, confirmation: { confirmed: true, state: "persisted", record } });
   });
 
   server.registerTool("add_todo", {
@@ -121,12 +160,19 @@ function buildServer(userKey: string) {
     annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
   }, async ({ text, idempotencyKey }) => {
     const now = Date.now();
+    const date = todayInIndia();
     const id = idempotencyKey ?? crypto.randomUUID();
-    await (await getDb()).insert(dailyTodos).values({
-      id, userKey, taskDate: todayInIndia(), text: text.trim(),
+    const clean = text.trim();
+    const db = await getDb();
+    await db.insert(dailyTodos).values({
+      id, userKey, taskDate: date, text: clean,
       done: false, createdAt: now, updatedAt: now,
     }).onConflictDoNothing();
-    return textResult({ ok: true, id, text, createdAt: now });
+    const record = await readTodo(db, userKey, date, id);
+    if (!record || record.text !== clean) {
+      throw new Error("Task write could not be confirmed or the idempotency key conflicts.");
+    }
+    return textResult({ ok: true, confirmation: { confirmed: true, state: "persisted", record } });
   });
 
   server.registerTool("complete_todo", {
@@ -135,9 +181,17 @@ function buildServer(userKey: string) {
     inputSchema: { taskId: z.string().min(1).max(80) },
     annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
   }, async ({ taskId }) => {
-    await (await getDb()).update(dailyTodos).set({ done: true, updatedAt: Date.now() })
-      .where(and(eq(dailyTodos.id, taskId), eq(dailyTodos.userKey, userKey)));
-    return textResult({ ok: true, taskId, done: true });
+    const date = todayInIndia();
+    const db = await getDb();
+    await db.update(dailyTodos).set({ done: true, updatedAt: Date.now() })
+      .where(and(
+        eq(dailyTodos.id, taskId),
+        eq(dailyTodos.userKey, userKey),
+        eq(dailyTodos.taskDate, date),
+      ));
+    const record = await readTodo(db, userKey, date, taskId);
+    if (!record || !record.done) throw new Error("Task completion could not be confirmed.");
+    return textResult({ ok: true, confirmation: { confirmed: true, state: "complete", record } });
   });
 
   return server;
@@ -151,7 +205,6 @@ async function handle(request: Request) {
       { status: 401 },
     );
   }
-  await ensureSchema();
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
