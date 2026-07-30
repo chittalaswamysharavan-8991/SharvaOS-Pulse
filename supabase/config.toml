@@ -1,0 +1,4 @@
+project_id = "vhzzugeeadaijkzrvowx"
+
+[functions.sharvaos-pulse-sync]
+verify_jwt = true
