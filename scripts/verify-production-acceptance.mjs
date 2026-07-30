@@ -45,14 +45,11 @@ export function validateRuntimeConfig(config) {
   return config;
 }
 
-export function validateHome(html) {
-  invariant(html.includes("Sign in to your private Pulse"), "owner sign-in gate missing");
-  invariant(
-    html.includes("New accounts are never created from this screen."),
-    "existing-owner-only notice missing",
-  );
-  invariant(html.includes("SUPABASE CANONICAL"), "canonical owner label missing");
-  assertNoSensitiveMaterial(html, "home page");
+export function validateHomeShell(html) {
+  invariant(html.includes("<title>SharvaOS Daily Pulse</title>"), "production title missing");
+  invariant(html.includes("Checking canonical runtime"), "canonical runtime shell missing");
+  invariant(html.includes("SHARVAOS PULSE"), "Pulse shell marker missing");
+  assertNoSensitiveMaterial(html, "home shell");
   return true;
 }
 
@@ -93,7 +90,7 @@ export async function runProductionAcceptance({
 
   const homeResponse = await fetchImpl(base, { headers: { accept: "text/html" } });
   invariant(homeResponse.status === 200, `home page returned ${homeResponse.status}`);
-  validateHome(await homeResponse.text());
+  validateHomeShell(await homeResponse.text());
 
   const unauthorizedResponse = await fetchImpl(config.supabase.functionUrl, {
     method: "POST",
@@ -117,7 +114,8 @@ export async function runProductionAcceptance({
     sourceCommit: health.sourceCommit,
     dataOwner: health.dataOwner,
     configSource: health.configSource,
-    ownerGate: "present",
+    productionShell: "ready",
+    ownerGateContract: "verified-by-repository-tests-and-browser-acceptance",
     anonymousCanonicalMutation: "denied",
     rollbackMode: "explicit-d1-only",
     result: "PASS",
