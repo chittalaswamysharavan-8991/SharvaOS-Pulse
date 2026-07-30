@@ -1,8 +1,9 @@
 name: Freeze v2.0.0 baseline
 
 on:
-  push:
-    branches: [phase1/v2.1-reliability-hardening]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
@@ -10,7 +11,7 @@ permissions:
 
 jobs:
   freeze:
-    if: github.event.head_commit.message == 'chore: request v2.0.0 baseline freeze'
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'phase1/v2.1-reliability-hardening'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -18,16 +19,20 @@ jobs:
       BASELINE_COMMIT: 43c9c2caa237e326e08671606d4b3b5aa117e5ec
       BASELINE_TAG: v2.0.0-baseline
     steps:
-      - name: Checkout with history
+      - name: Checkout pull-request branch with history
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
+          persist-credentials: true
 
       - name: Verify baseline commit
         shell: bash
         run: |
+          git fetch origin main --force
           git cat-file -e "${BASELINE_COMMIT}^{commit}"
           test "$(git rev-parse origin/main)" = "${BASELINE_COMMIT}"
+          grep -F "${BASELINE_COMMIT}" .github/baseline-freeze-request
 
       - name: Create immutable baseline release
         shell: bash
