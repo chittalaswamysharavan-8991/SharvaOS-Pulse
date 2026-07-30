@@ -5,7 +5,7 @@ SharvaOS Daily Pulse is the focused daily-capture vertical slice of SharvaOS. It
 **Current runtime version:** `2.1.0`  
 **Canonical data contract:** `sharvaos.pulse.v1`  
 **Frozen pre-behaviour baseline:** `v2.0.0-baseline`  
-**Product status:** Supabase runtime cutover implementation is ready behind a fail-closed feature flag; live activation remains gated by repository privacy, deployment configuration and owner-session staging proof.
+**Product status:** Supabase runtime cutover implementation is ready behind an explicit fail-closed data-owner switch; live activation remains gated by repository privacy, deployment configuration and owner-session staging proof.
 
 ## Provenance
 
@@ -32,12 +32,14 @@ The source was imported from `SharvaOS-Daily-Pulse-v2-editable-source.zip`.
 - Ordered offline retry and reconnect reconciliation
 - Existing-owner email OTP gate for canonical access
 - Automatic Supabase session restore and access-token refresh
-- Runtime-selectable Supabase canonical or D1 rollback transport
+- Runtime-selectable Supabase canonical or explicit D1 rollback transport
 - Authenticated `/api/day` D1 rollback route
 - Confirmed HTTP and MCP writes with authoritative read-back
 - Supabase canonical logs, todos and mutation receipts
 - Authenticated `sharvaos-pulse-sync` Edge Function
 - Lossless compatibility mirroring from the existing water tables
+- Partial-day device-cache reconciliation with duplicate avoidance
+- Bounded canonical import batches without silent truncation
 - Responsive and reduced-motion styling
 - Vinext/Cloudflare Worker build and artifact validation
 
@@ -68,13 +70,16 @@ The 8 existing water rows and 3 void records were reconciled exactly. One histor
 
 The UI now contains a controlled runtime router:
 
-- `SHARVAOS_PULSE_DATA_OWNER=d1` uses the existing rollback transport;
+- `SHARVAOS_PULSE_DATA_OWNER=d1` explicitly enables the existing rollback transport;
 - `SHARVAOS_PULSE_DATA_OWNER=supabase` requires complete publishable config and an authenticated owner OTP session;
-- incomplete Supabase config fails closed to D1 rather than entering a dual-write state;
+- a missing/invalid owner value or incomplete Supabase config blocks network sync and keeps changes queued on the device;
 - OTP requests cannot create users;
 - access tokens are refreshed before canonical requests;
 - queued mutations use stable queue identities as canonical idempotency keys;
 - an expired session preserves queued work and returns the user to the sign-in gate;
+- pending operations drain before cached-day migration;
+- legacy canonical water cannot block migration of missing smoke, food or tasks;
+- duplicate IDs/fingerprints are skipped and imports are split into 100-item batches;
 - rollback requires one environment-variable change and no code/database revert.
 
 ## Important boundary
@@ -85,9 +90,9 @@ No service-role key, user JWT, refresh token, personal email or live publishable
 
 ## Runtime environment
 
-D1 rollback is the default and requires no additional Supabase client variables.
+Every deployment must explicitly set a runtime owner. Missing or invalid owner configuration is device-only and does not write to either backend.
 
-Supabase activation requires deployment environment variables:
+Supabase activation:
 
 ```text
 SHARVAOS_PULSE_DATA_OWNER=supabase
@@ -149,10 +154,10 @@ D1 migration requirements are documented in [`docs/MIGRATIONS.md`](docs/MIGRATIO
 ## Architecture map
 
 - `app/page.tsx` — Daily Pulse experience, OTP gate, local queue and runtime transport selection
-- `app/api/runtime-config/route.ts` — publishable-only, fail-closed data-owner configuration
+- `app/api/runtime-config/route.ts` — publishable-only, explicit fail-closed data-owner configuration
 - `lib/pulse-auth-client.mjs` — existing-owner OTP, session persistence and refresh
-- `lib/pulse-runtime-config.mjs` — runtime config validation and D1 fallback
-- `lib/pulse-transport.mjs` — canonical/D1 transport boundary and queue identity mapping
+- `lib/pulse-runtime-config.mjs` — runtime config validation and blocked-sync state
+- `lib/pulse-transport.mjs` — canonical/D1 transport, queue identity and partial-day reconciliation
 - `lib/pulse-reliability.mjs` — shared validation and deterministic mutation replay
 - `lib/pulse-canonical-client.mjs` — dynamic authenticated Supabase Edge Function client
 - `app/api/day/route.ts` — authenticated D1 rollback API and authoritative confirmations
