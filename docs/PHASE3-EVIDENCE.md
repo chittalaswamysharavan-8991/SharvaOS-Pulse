@@ -10,6 +10,7 @@
 - Dynamic JWT forwarding to canonical Edge Function: implemented
 - Stable offline queue idempotency mapping: implemented
 - Auth-expiry queue preservation: implemented
+- Nested runtime load effect captures a verified non-null transport before asynchronous work
 - Local contract tests: PASS
 - Default deployment behavior: D1 rollback remains active until the explicit Supabase owner flag and complete environment are present
 - Production activation: BLOCKED by repository privacy and deployment environment gates
