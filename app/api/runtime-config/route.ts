@@ -24,8 +24,18 @@ async function readRuntimeValues() {
 
 export async function GET() {
   const values = await readRuntimeValues();
-  const requestedOwner = text(values, OWNER_ENV).toLowerCase() === "supabase" ? "supabase" : "d1";
-  if (requestedOwner === "d1") {
+  const ownerValue = text(values, OWNER_ENV).toLowerCase();
+  if (ownerValue !== "d1" && ownerValue !== "supabase") {
+    return Response.json({
+      requestedOwner: "unknown",
+      dataOwner: "blocked",
+      cutoverReady: false,
+      reason: `Runtime owner blocked: ${OWNER_ENV} must be explicitly set to d1 or supabase`,
+      supabase: null,
+    }, { headers: { "cache-control": "no-store, max-age=0" } });
+  }
+
+  if (ownerValue === "d1") {
     return Response.json({
       requestedOwner: "d1",
       dataOwner: "d1",
