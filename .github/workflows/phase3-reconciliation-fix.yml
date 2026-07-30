@@ -26,20 +26,33 @@ jobs:
           const path = 'app/page.tsx';
           let source = fs.readFileSync(path, 'utf8');
 
-          const importNeedle = '  createCanonicalPulseTransport,\n  createD1PulseTransport,\n} from "../lib/pulse-transport.mjs";';
-          const importReplacement = '  createCanonicalPulseTransport,\n  createD1PulseTransport,\n  selectMissingDayEntries,\n} from "../lib/pulse-transport.mjs";';
+          const importNeedle = [
+            '  createCanonicalPulseTransport,',
+            '  createD1PulseTransport,',
+            '} from "../lib/pulse-transport.mjs";',
+          ].join('\n');
+          const importReplacement = [
+            '  createCanonicalPulseTransport,',
+            '  createD1PulseTransport,',
+            '  selectMissingDayEntries,',
+            '} from "../lib/pulse-transport.mjs";',
+          ].join('\n');
           if (!source.includes(importNeedle)) throw new Error('transport import boundary not found');
           source = source.replace(importNeedle, importReplacement);
 
-          const oldBlock = `        let nextDay = applyPendingOperations(remote, pending) as DayState;
-        if (!pending.length && !remote.logs.length && !remote.todos.length && (cached.logs.length || cached.todos.length)) {
-          nextDay = await activeTransport.importDay(date, cached, \`device-initial:\${date}\`) as DayState;
-        }`;
-          const newBlock = `        let nextDay = applyPendingOperations(remote, pending) as DayState;
-        const missingCached = selectMissingDayEntries(cached, remote) as DayState;
-        if (!pending.length && (missingCached.logs.length || missingCached.todos.length)) {
-          nextDay = await activeTransport.importDay(date, missingCached, \`device-initial:\${date}\`) as DayState;
-        }`;
+          const oldBlock = [
+            '        let nextDay = applyPendingOperations(remote, pending) as DayState;',
+            '        if (!pending.length && !remote.logs.length && !remote.todos.length && (cached.logs.length || cached.todos.length)) {',
+            '          nextDay = await activeTransport.importDay(date, cached, `device-initial:${date}`) as DayState;',
+            '        }',
+          ].join('\n');
+          const newBlock = [
+            '        let nextDay = applyPendingOperations(remote, pending) as DayState;',
+            '        const missingCached = selectMissingDayEntries(cached, remote) as DayState;',
+            '        if (!pending.length && (missingCached.logs.length || missingCached.todos.length)) {',
+            '          nextDay = await activeTransport.importDay(date, missingCached, `device-initial:${date}`) as DayState;',
+            '        }',
+          ].join('\n');
           if (!source.includes(oldBlock)) throw new Error('initial import block not found');
           source = source.replace(oldBlock, newBlock);
 
