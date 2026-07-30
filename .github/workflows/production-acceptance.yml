@@ -1,0 +1,52 @@
+name: Production Acceptance
+
+on:
+  pull_request:
+    paths:
+      - "scripts/verify-production-acceptance.mjs"
+      - "tests/phase5-production-acceptance.test.mjs"
+      - "docs/PHASE5-PRODUCTION-ACCEPTANCE.md"
+      - ".github/workflows/production-acceptance.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "scripts/verify-production-acceptance.mjs"
+      - "tests/phase5-production-acceptance.test.mjs"
+      - "docs/PHASE5-PRODUCTION-ACCEPTANCE.md"
+      - ".github/workflows/production-acceptance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify_production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Verify live production contract
+        env:
+          SHARVAOS_PULSE_PRODUCTION_URL: https://sharvaos-pulse.vercel.app
+          EXPECTED_VERSION: 2.2.0
+          EXPECTED_CONTRACT: sharvaos.pulse.v1
+          EXPECTED_SOURCE_COMMIT: af1cee26053ce4027bf87e8154473d5edcf04d2d
+        run: node scripts/verify-production-acceptance.mjs
+
+      - name: Upload acceptance evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sharvaos-pulse-phase5-production-acceptance
+          path: verification/phase5-production-acceptance.json
