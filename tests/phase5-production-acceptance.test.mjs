@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
   runProductionAcceptance,
   validateHealth,
-  validateHome,
+  validateHomeShell,
   validateRuntimeConfig,
 } from "../scripts/verify-production-acceptance.mjs";
 
@@ -40,25 +41,25 @@ const config = {
   },
 };
 
-const home = [
-  "<h1>Sign in to your private Pulse</h1>",
-  "<p>New accounts are never created from this screen.</p>",
-  "<p>SUPABASE CANONICAL</p>",
+const homeShell = [
+  "<title>SharvaOS Daily Pulse</title>",
+  "<p>SHARVAOS PULSE</p>",
+  "<h2>Checking canonical runtime…</h2>",
 ].join("");
 
 test("Phase 5 validators accept the reviewed production contract", () => {
   assert.equal(validateHealth(health).status, "ready");
   assert.equal(validateRuntimeConfig(config).dataOwner, "supabase");
-  assert.equal(validateHome(home), true);
+  assert.equal(validateHomeShell(homeShell), true);
 });
 
-test("production acceptance verifies health, runtime, owner gate, and anonymous rejection", async () => {
+test("production acceptance verifies health, runtime, shell, and anonymous rejection", async () => {
   const calls = [];
   const fetchImpl = async (url, options = {}) => {
     calls.push({ url, options });
     if (url.endsWith("/api/health")) return response(200, health);
     if (url.endsWith("/api/runtime-config")) return response(200, config);
-    if (url === "https://pulse.example") return response(200, home, "text/html");
+    if (url === "https://pulse.example") return response(200, homeShell, "text/html");
     return response(401, { message: "Missing authorization header" });
   };
 
@@ -69,10 +70,22 @@ test("production acceptance verifies health, runtime, owner gate, and anonymous 
   });
 
   assert.equal(evidence.result, "PASS");
+  assert.equal(evidence.productionShell, "ready");
   assert.equal(evidence.anonymousCanonicalMutation, "denied");
   assert.equal(calls.length, 4);
   assert.equal(calls[3].options.headers.apikey, config.supabase.publishableKey);
   assert.equal(calls[3].options.headers.authorization, undefined);
+});
+
+test("hydrated owner gate remains existing-user-only in production source", async () => {
+  const [page, authClient] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/pulse-auth-client.mjs", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /Sign in to your private Pulse/);
+  assert.match(page, /New accounts are never created from this screen\./);
+  assert.match(page, /SUPABASE CANONICAL/);
+  assert.match(authClient, /create_user:\s*false/);
 });
 
 test("production acceptance rejects a deployment from an unexpected commit", () => {
@@ -93,7 +106,7 @@ test("production acceptance fails if the canonical function permits anonymous ac
   const fetchImpl = async (url) => {
     if (url.endsWith("/api/health")) return response(200, health);
     if (url.endsWith("/api/runtime-config")) return response(200, config);
-    if (url === "https://pulse.example") return response(200, home, "text/html");
+    if (url === "https://pulse.example") return response(200, homeShell, "text/html");
     return response(200, { day: { logs: [], todos: [] } });
   };
 
