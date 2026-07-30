@@ -204,18 +204,21 @@ test("D1 transport remains an explicit one-variable rollback path", async () => 
   assert.equal(JSON.parse(calls[1].options.body).date, "2026-07-30");
 });
 
-test("Phase 3 source exposes only publishable runtime config and contains no live key or service role", async () => {
+test("runtime source exposes public client config while excluding privileged credentials", async () => {
   const files = await Promise.all([
     readFile(new URL("../app/api/runtime-config/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/pulse-auth-client.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../lib/pulse-public-runtime.mjs", import.meta.url), "utf8"),
   ]);
   const source = files.join("\n");
   assert.match(source, /SHARVAOS_PULSE_DATA_OWNER/);
   assert.match(source, /SUPABASE_PUBLISHABLE_KEY/);
   assert.match(source, /dataOwner:\s*"blocked"/);
   assert.match(source, /create_user:\s*false/);
+  assert.match(source, /sb_publishable_/);
   assert.doesNotMatch(source, /Supabase configuration check failed; D1 rollback is active/);
   assert.doesNotMatch(source, /SERVICE_ROLE|service_role/i);
-  assert.doesNotMatch(source, /sb_publishable_L_bLdMqmiz9QvTVZIZ_j8A_2-nY_apM/);
+  assert.doesNotMatch(source, /eyJ[a-zA-Z0-9_-]{20,}\./);
+  assert.doesNotMatch(source, /@gmail\.com|@googlemail\.com/i);
 });
