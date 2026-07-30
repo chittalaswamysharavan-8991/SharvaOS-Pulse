@@ -1,0 +1,42 @@
+name: Align Google Auth Production Contract
+
+on:
+  push:
+    branches:
+      - phase5/google-auth-production-url
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase5/google-auth-production-url
+      - name: Align canonical production URL and source commit
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          paths = [
+              Path('.github/workflows/production-acceptance.yml'),
+              Path('scripts/verify-production-acceptance.mjs'),
+              Path('tests/phase5-production-acceptance.test.mjs'),
+              Path('docs/PHASE5-PRODUCTION-ACCEPTANCE.md'),
+              Path('docs/GOOGLE-AUTH-CUTOVER.md'),
+              Path('docs/GOOGLE-AUTH-EVIDENCE.md'),
+          ]
+          for path in paths:
+              text = path.read_text()
+              text = text.replace('https://sharvaos-pulse.vercel.app', 'https://sharvaos-pulse-google.vercel.app')
+              text = text.replace('af1cee26053ce4027bf87e8154473d5edcf04d2d', '748ecee2b36dbf40bd990ac0d3fd4aa6a90d02f2')
+              path.write_text(text)
+          PY
+          rm -f .github/workflows/align-google-production.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "docs: promote Google auth production URL"
+          git push origin HEAD:phase5/google-auth-production-url
