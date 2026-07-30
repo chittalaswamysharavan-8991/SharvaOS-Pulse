@@ -118,7 +118,11 @@ export default function Home() {
 
   const flushPending = useCallback(async () => {
     const transport = transportRef.current;
-    if (!transport || flushInFlight.current || !pendingRef.current.length) return;
+    if (!transport) {
+      if (pendingRef.current.length) setSyncState("offline");
+      return;
+    }
+    if (flushInFlight.current || !pendingRef.current.length) return;
     flushInFlight.current = true;
     setSyncState("syncing");
     try {
