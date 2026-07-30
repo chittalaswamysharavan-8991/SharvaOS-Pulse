@@ -17,7 +17,8 @@
     "db:migrate:local": "bash scripts/migrate-d1.sh local",
     "db:migrate:remote": "bash scripts/migrate-d1.sh remote",
     "typecheck": "tsc --noEmit",
-    "verify": "npm run lint && npm run typecheck && npm run build && npm test"
+    "verify": "npm run lint && npm run typecheck && npm run build && npm test",
+    "verify:production": "node scripts/verify-production-acceptance.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
