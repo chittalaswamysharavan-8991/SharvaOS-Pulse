@@ -6,6 +6,7 @@
 - Project ref: `vhzzugeeadaijkzrvowx`
 - `canonical_pulse_v1`: success
 - `harden_pulse_function_grants`: success
+- `bind_receipt_hash_to_mutation_envelope`: success
 
 ## Deployed function
 
@@ -28,18 +29,22 @@
 
 No historical row was discarded or silently normalized.
 
-## Transactional canary
+## Transactional canaries
 
-The database canary used the existing authenticated owner identity, exercised the canonical RPC boundary, asserted results and removed all canary rows and receipts before returning.
+The database canaries used the existing authenticated owner identity, exercised the canonical RPC boundary, asserted results and removed all canary rows and receipts before returning.
 
 - authenticated canonical owner: PASS
 - write and read-back confirmation: PASS
-- same-key same-payload replay: PASS
+- exact same mutation-envelope replay: PASS
+- same key with different date rejected: PASS
+- same key with different action rejected: PASS
 - task completion update: PASS
 - log soft-delete read-back: PASS
 - task soft-delete read-back: PASS
 - canary cleanup: PASS
 - remaining canary logs, todos and receipts: `0 / 0 / 0`
+
+Receipts hash the complete canonical mutation envelope—`date`, `action`, and `payload`—rather than payload alone.
 
 ## Function privilege audit
 
@@ -50,7 +55,7 @@ The database canary used the existing authenticated owner identity, exercised th
 | `pulse_mirror_legacy_water_insert` | denied | denied | denied |
 | `pulse_mirror_legacy_water_void` | denied | denied | denied |
 
-`pulse_apply_mutation` is intentionally `SECURITY DEFINER` because direct table mutations are revoked. It requires `auth.uid()`, has a fixed empty search path, validates the action and payload, and records an idempotent receipt before returning authoritative state.
+`pulse_apply_mutation` is intentionally `SECURITY DEFINER` because direct table mutations are revoked. It requires `auth.uid()`, has a fixed empty search path, validates the action and payload, records an envelope-bound idempotent receipt, and returns authoritative state.
 
 ## Advisor audit
 
