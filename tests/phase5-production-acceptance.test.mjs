@@ -26,7 +26,7 @@ const health = {
   configSource: "public-default",
   canonicalFunction: "configured",
   authentication: "owner-session-required",
-  sourceCommit: "af1cee26053ce4027bf87e8154473d5edcf04d2d",
+  sourceCommit: "748ecee2b36dbf40bd990ac0d3fd4aa6a90d02f2",
 };
 
 const config = {
