@@ -3,18 +3,19 @@
 ## Implementation status
 
 - Runtime data-owner router: implemented
-- Fail-closed Supabase configuration: implemented
-- D1 one-variable rollback: implemented
+- Missing/invalid owner configuration blocks network synchronization
+- Incomplete/unavailable Supabase configuration remains device-only and cannot write to D1
+- D1 one-variable rollback requires explicit owner selection
 - Existing-owner email OTP flow: implemented
 - Automatic session restore and refresh: implemented
 - Dynamic JWT forwarding to canonical Edge Function: implemented
 - Stable offline queue idempotency mapping: implemented
 - Auth-expiry queue preservation: implemented
-- Nested runtime load effect captures a verified non-null transport before asynchronous work
+- Device cache remains readable while synchronization is blocked
+- Pending operations drain before cached-day reconciliation
 - Partial canonical days reconcile missing device logs and tasks by ID or deterministic fingerprint
 - Canonical initial import is split into bounded 100-item batches without silent truncation
 - Local contract tests: PASS
-- Default deployment behavior: D1 rollback remains active until the explicit Supabase owner flag and complete environment are present
 - Production activation: BLOCKED by repository privacy and deployment environment gates
 
 ## Auth readiness
@@ -31,14 +32,15 @@ The Phase 3 test suite proves:
 - session persistence after six-digit OTP verification;
 - expired-session refresh before a canonical request;
 - dynamic access-token and publishable-key headers;
-- incomplete Supabase config falls back to D1;
-- complete config selects the canonical transport;
+- missing/unknown runtime owner is blocked;
+- incomplete Supabase config is blocked rather than redirected to D1;
+- exact `d1` selection enables only the rollback transport;
+- complete Supabase config selects the canonical transport;
 - stable queue IDs become canonical idempotency keys;
 - separate intentional task toggles do not collide;
 - an existing canonical water row cannot block migration of missing device smoke, food or task entries;
 - equivalent entries are skipped by ID or exact source fingerprint to prevent duplicates;
 - more than 100 local entries are imported in unique bounded batches;
-- D1 remains an explicit rollback transport;
 - no live publishable key, JWT or service-role key is committed.
 
 ## CI gate
@@ -56,7 +58,7 @@ These checks require the manual privacy/environment gate and a real owner OTP se
 - authenticated staging HTTP read/write through `sharvaos-pulse-sync`;
 - iPhone OTP UX verification;
 - offline-to-online canonical replay from the deployed UI;
-- deployment-level D1 rollback exercise;
+- deployment-level blocked-sync and D1 rollback exercises;
 - production promotion.
 
 Phase 3 must not be reported as a live production cutover until those checks are recorded without exposing an OTP or token.
