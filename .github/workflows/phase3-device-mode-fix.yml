@@ -1,0 +1,57 @@
+name: Phase 3 device mode fix
+
+on:
+  push:
+    branches: [phase3/supabase-runtime-cutover]
+    paths: [.github/workflows/phase3-device-mode-fix.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase3/supabase-runtime-cutover
+          fetch-depth: 0
+
+      - name: Mark queued device work offline when no transport exists
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = 'app/page.tsx';
+          let source = fs.readFileSync(path, 'utf8');
+          const oldBlock = [
+            '    const transport = transportRef.current;',
+            '    if (!transport || flushInFlight.current || !pendingRef.current.length) return;',
+            '    flushInFlight.current = true;',
+          ].join('\n');
+          const newBlock = [
+            '    const transport = transportRef.current;',
+            '    if (!transport) {',
+            '      if (pendingRef.current.length) setSyncState("offline");',
+            '      return;',
+            '    }',
+            '    if (flushInFlight.current || !pendingRef.current.length) return;',
+            '    flushInFlight.current = true;',
+          ].join('\n');
+          if (!source.includes(oldBlock)) throw new Error('flush boundary not found');
+          source = source.replace(oldBlock, newBlock);
+          if (!source.includes('if (pendingRef.current.length) setSyncState("offline");')) throw new Error('device-mode marker missing');
+          fs.writeFileSync(path, source);
+          NODE
+          git diff --check
+
+      - name: Commit device-mode source and remove helper
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/phase3-device-mode-fix.yml
+          git add app/page.tsx
+          git commit -m "fix: show device mode when queued work has no transport"
+          git push origin HEAD:phase3/supabase-runtime-cutover
