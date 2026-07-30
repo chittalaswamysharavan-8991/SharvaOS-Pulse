@@ -46,7 +46,7 @@ export async function GET() {
   if (missing.length || !projectUrl.startsWith("https://") || !functionUrl.startsWith("https://")) {
     return Response.json({
       requestedOwner: "supabase",
-      dataOwner: "d1",
+      dataOwner: "blocked",
       cutoverReady: false,
       reason: `Supabase cutover blocked: ${missing.length ? `missing ${missing.join(", ")}` : "HTTPS configuration required"}`,
       supabase: null,
