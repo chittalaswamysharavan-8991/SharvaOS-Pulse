@@ -1,0 +1,64 @@
+name: Patch delete log UI
+on:
+  push:
+    branches:
+      - phase5/delete-log-ui
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase5/delete-log-ui
+      - name: Add delete controls and tests
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          page = Path('app/page.tsx')
+          text = page.read_text()
+          old = '''  function undoLast() {
+    if (!undoEntry) return;
+    const id = undoEntry.id;
+    setUndoEntry(null);
+    setToast("Last entry removed");
+    persist({ action: "delete_log", id });
+  }
+'''
+          new = '''  function removeLog(entry: LogEntry) {
+    if (!window.confirm(`Delete ${entry.label}?`)) return;
+    if (undoEntry?.id === entry.id) setUndoEntry(null);
+    setToast(`${entry.label} deleted`);
+    persist({ action: "delete_log", id: entry.id });
+  }
+  function undoLast() {
+    if (!undoEntry) return;
+    const entry = undoEntry;
+    setUndoEntry(null);
+    setToast("Last entry removed");
+    persist({ action: "delete_log", id: entry.id });
+  }
+'''
+          if old not in text:
+              raise SystemExit('undo block not found')
+          text = text.replace(old, new, 1)
+          old_timeline = '''{day.logs.map((entry, index) => <article className={`timeline-entry ${entry.kind}`} key={entry.id} style={{ "--delay": `${index * 40}ms` } as React.CSSProperties}><div className="entry-icon">{entry.kind === "water" ? "◒" : entry.kind === "smoke" ? "≋" : "◉"}</div><div><strong>{entry.label}</strong><span>{entry.detail}</span></div><time>{currentTime(entry.loggedAt)}</time></article>)}'''
+          new_timeline = '''{day.logs.map((entry, index) => <article className={`timeline-entry ${entry.kind}`} key={entry.id} style={{ "--delay": `${index * 40}ms` } as React.CSSProperties}><div className="entry-icon">{entry.kind === "water" ? "◒" : entry.kind === "smoke" ? "≋" : "◉"}</div><div><strong>{entry.label}</strong><span>{entry.detail}</span></div><time>{currentTime(entry.loggedAt)}</time><button aria-label={`Delete ${entry.label}`} onClick={() => removeLog(entry)} style={{ background: "transparent", border: "1px solid var(--line)", borderRadius: 999, color: "var(--muted)", cursor: "pointer", fontSize: 16, height: 32, width: 32 }} type="button">×</button></article>)}'''
+          if old_timeline not in text:
+              raise SystemExit('timeline block not found')
+          text = text.replace(old_timeline, new_timeline, 1)
+          old_recent = '''{recent(selectedCard).map((entry) => <div key={entry.id}><span>{entry.label}<small>{entry.detail}</small></span><time>{currentTime(entry.loggedAt)}</time></div>)}'''
+          new_recent = '''{recent(selectedCard).map((entry) => <div key={entry.id}><span>{entry.label}<small>{entry.detail}</small></span><time>{currentTime(entry.loggedAt)}</time><button aria-label={`Delete ${entry.label}`} className="sheet-check" onClick={() => removeLog(entry)} type="button">Delete</button></div>)}'''
+          if old_recent not in text:
+              raise SystemExit('recent block not found')
+          text = text.replace(old_recent, new_recent, 1)
+          page.write_text(text)
+          test = Path('tests/phase5-delete-log-ui.test.mjs')
+          test.write_text('''import assert from "node:assert/strict";\nimport { readFile } from "node:fs/promises";\nimport test from "node:test";\n\ntest("timeline and detail history expose delete log controls", async () => {\n  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");\n  assert.match(page, /function removeLog\\(entry: LogEntry\\)/);\n  assert.match(page, /persist\\(\\{ action: "delete_log", id: entry\\.id \\}\\)/);\n  assert.match(page, /aria-label=\\{`Delete \\$\\{entry\\.label\\}`\\}/);\n  assert.match(page, /window\\.confirm\\(`Delete \\$\\{entry\\.label\\}\\?`\\)/);\n});\n''')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/page.tsx tests/phase5-delete-log-ui.test.mjs
+          git commit -m "fix: add log deletion controls"
+          git push origin HEAD:phase5/delete-log-ui
