@@ -1,0 +1,67 @@
+name: Phase 3 source fix
+
+on:
+  push:
+    branches: [phase3/supabase-runtime-cutover]
+    paths: [.github/workflows/phase3-source-fix.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase3/supabase-runtime-cutover
+          fetch-depth: 0
+
+      - name: Apply exact transport narrowing fix
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = 'app/page.tsx';
+          let source = fs.readFileSync(path, 'utf8');
+
+          const anchor = '    if (!runtimeReady || !transport) return;\n    let active = true;';
+          if (!source.includes(anchor)) throw new Error('transport anchor not found');
+          source = source.replace(anchor, '    if (!runtimeReady || !transport) return;\n    const activeTransport = transport;\n    let active = true;');
+
+          function replaceSecond(needle, replacement) {
+            const first = source.indexOf(needle);
+            const second = source.indexOf(needle, first + needle.length);
+            if (first < 0 || second < 0 || source.indexOf(needle, second + needle.length) >= 0) {
+              throw new Error(`expected exactly two occurrences: ${needle}`);
+            }
+            source = source.slice(0, second) + replacement + source.slice(second + needle.length);
+          }
+
+          replaceSecond(
+            'const remote = await transport.readDay(date) as DayState;',
+            'const remote = await activeTransport.readDay(date) as DayState;',
+          );
+          const importNeedle = 'nextDay = await transport.importDay(date, cached, `device-initial:${date}`) as DayState;';
+          if ((source.match(/nextDay = await transport\.importDay/g) || []).length !== 1) throw new Error('import target count mismatch');
+          source = source.replace(importNeedle, 'nextDay = await activeTransport.importDay(date, cached, `device-initial:${date}`) as DayState;');
+          replaceSecond(
+            'if (transport.owner === "supabase" && errorStatus(error) === 401) {',
+            'if (activeTransport.owner === "supabase" && errorStatus(error) === 401) {',
+          );
+
+          if (!source.includes('const activeTransport = transport;')) throw new Error('fix not applied');
+          fs.writeFileSync(path, source);
+          NODE
+          git diff --check
+
+      - name: Commit fixed source and remove helper
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/phase3-source-fix.yml
+          git add app/page.tsx
+          git commit -m "fix: preserve non-null runtime transport in load effect"
+          git push origin HEAD:phase3/supabase-runtime-cutover
