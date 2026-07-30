@@ -20,6 +20,7 @@ import { loadPulseRuntimeConfig } from "../lib/pulse-runtime-config.mjs";
 import {
   createCanonicalPulseTransport,
   createD1PulseTransport,
+  reconcileMissingDay,
   selectMissingDayEntries,
 } from "../lib/pulse-transport.mjs";
 
@@ -165,6 +166,12 @@ export default function Home() {
     }
   }, [date, requireSignIn, savePending]);
 
+  const reconcileMissing = useCallback(async (transport: PulseTransport, missing: DayState) => {
+    const result = await reconcileMissingDay({ transport, date, missing });
+    if (result.conflict) setToast("Canonical version kept · stale device copy skipped");
+    return result.day as DayState;
+  }, [date]);
+
   useEffect(() => {
     let active = true;
     async function initializeRuntime() {
@@ -273,14 +280,14 @@ export default function Home() {
           const confirmed = await activeTransport.readDay(date) as DayState;
           const missingAfterQueue = selectMissingDayEntries(cached, confirmed) as DayState;
           nextDay = missingAfterQueue.logs.length || missingAfterQueue.todos.length
-            ? await activeTransport.importDay(date, missingAfterQueue, `device-initial:${date}`) as DayState
+            ? await reconcileMissing(activeTransport, missingAfterQueue)
             : confirmed;
           setDay(nextDay);
           setSyncState("synced");
         } else {
           const missingCached = selectMissingDayEntries(cached, remote) as DayState;
           if (missingCached.logs.length || missingCached.todos.length) {
-            nextDay = await activeTransport.importDay(date, missingCached, `device-initial:${date}`) as DayState;
+            nextDay = await reconcileMissing(activeTransport, missingCached);
             setDay(nextDay);
           }
           setSyncState("synced");
@@ -299,7 +306,7 @@ export default function Home() {
     }
     void load();
     return () => { active = false; };
-  }, [date, flushPending, pendingKey, requireSignIn, runtimeReady, storageKey, transportVersion]);
+  }, [date, flushPending, pendingKey, reconcileMissing, requireSignIn, runtimeReady, storageKey, transportVersion]);
 
   useEffect(() => {
     function retry() { void flushPending(); }
