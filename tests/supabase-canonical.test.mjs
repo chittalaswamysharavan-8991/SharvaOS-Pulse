@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createPulseCanonicalClient } from "../lib/pulse-canonical-client.mjs";
 
 const migrationPath = new URL("../supabase/migrations/20260730082500_canonical_pulse_v1.sql", import.meta.url);
+const envelopeMigrationPath = new URL("../supabase/migrations/20260730091500_bind_receipt_hash_to_mutation_envelope.sql", import.meta.url);
 const functionPath = new URL("../supabase/functions/sharvaos-pulse-sync/index.ts", import.meta.url);
 
 function response(status, body) {
@@ -24,6 +25,13 @@ test("canonical migration freezes owner-scoped tables, RLS, receipts, and compat
     "legacy_out_of_range",
   ]) assert.match(sql, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(sql, /drop table\s+public\.sharva_water_logs/i);
+});
+
+test("idempotency receipts bind date, action, and payload rather than payload alone", async () => {
+  const sql = await readFile(envelopeMigrationPath, "utf8");
+  assert.match(sql, /jsonb_build_object\('date', p_date, 'action', p_action, 'payload', p_payload\)/);
+  assert.match(sql, /Mutation-envelope hash migration requires an empty receipt table/);
+  assert.match(sql, /Mutation-envelope hash replacement could not be verified/);
 });
 
 test("canonical Edge Function requires a bearer session and forwards authenticated RPC calls", async () => {
