@@ -4,7 +4,11 @@ import { readFile } from "node:fs/promises";
 import { createPulseAuthClient } from "../lib/pulse-auth-client.mjs";
 import { createPulseCanonicalClient } from "../lib/pulse-canonical-client.mjs";
 import { normalizePulseRuntimeConfig } from "../lib/pulse-runtime-config.mjs";
-import { createCanonicalPulseTransport, createD1PulseTransport } from "../lib/pulse-transport.mjs";
+import {
+  createCanonicalPulseTransport,
+  createD1PulseTransport,
+  selectMissingDayEntries,
+} from "../lib/pulse-transport.mjs";
 
 function response(status, body = {}) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
@@ -118,6 +122,55 @@ test("canonical transport binds every queued mutation to its stable queue identi
   assert.equal(calls[1].idempotencyKey, "device:queue-toggle-0002");
   assert.deepEqual(calls[0].payload, { id: "task-1", done: true });
   assert.notEqual(calls[0].idempotencyKey, calls[1].idempotencyKey);
+});
+
+test("partial canonical days import only missing device entries", () => {
+  const local = {
+    logs: [
+      { id: "water-1", kind: "water", label: "250 ml water", detail: "Hydration", amount: 250, loggedAt: 1000 },
+      { id: "food-copy", kind: "food", label: "Rice", detail: "Lunch", amount: null, loggedAt: 2000 },
+      { id: "smoke-new", kind: "smoke", label: "Smoke", detail: "Entry 1 today", amount: null, loggedAt: 3000 },
+    ],
+    todos: [
+      { id: "task-copy", text: "Already canonical", done: true, createdAt: 4000 },
+      { id: "task-new", text: "Missing local task", done: false, createdAt: 5000 },
+    ],
+  };
+  const remote = {
+    logs: [
+      { id: "water-1", kind: "water", label: "250 ml water", detail: "Hydration", amount: 250, loggedAt: 1000 },
+      { id: "food-remote", kind: "food", label: "Rice", detail: "Lunch", amount: null, loggedAt: 2000 },
+    ],
+    todos: [
+      { id: "task-remote", text: "Already canonical", done: false, createdAt: 4000 },
+    ],
+  };
+
+  const missing = selectMissingDayEntries(local, remote);
+  assert.deepEqual(missing.logs.map((entry) => entry.id), ["smoke-new"]);
+  assert.deepEqual(missing.todos.map((entry) => entry.id), ["task-new"]);
+});
+
+test("canonical imports are batched without truncation and keep unique bounded IDs", async () => {
+  const calls = [];
+  const client = {
+    readDay: async () => ({ day: { logs: [], todos: [] } }),
+    applyMutation: async () => ({ day: { logs: [], todos: [] } }),
+    importDay: async (input) => {
+      calls.push(input);
+      return { day: { logs: input.logs, todos: input.todos } };
+    },
+  };
+  const transport = createCanonicalPulseTransport({ client });
+  const logs = Array.from({ length: 205 }, (_, index) => ({ id: `log-${index}` }));
+  const todos = Array.from({ length: 101 }, (_, index) => ({ id: `todo-${index}` }));
+  await transport.importDay("2026-07-30", { logs, todos }, "x".repeat(80));
+
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls.map((call) => call.logs.length), [100, 100, 5]);
+  assert.deepEqual(calls.map((call) => call.todos.length), [100, 1, 0]);
+  assert.equal(new Set(calls.map((call) => call.importId)).size, 3);
+  assert.ok(calls.every((call) => call.importId.length <= 80));
 });
 
 test("D1 transport remains an explicit one-variable rollback path", async () => {
