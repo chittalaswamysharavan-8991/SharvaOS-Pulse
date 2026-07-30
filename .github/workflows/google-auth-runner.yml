@@ -1,0 +1,41 @@
+name: Google auth recovery runner
+
+on:
+  push:
+    branches:
+      - phase5/google-auth
+    paths:
+      - .google-auth-runner-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase5/google-auth
+          fetch-depth: 0
+
+      - name: Extract and execute patch payload
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/google-auth-patch.yml').read_text().splitlines()
+          start = next(i for i, line in enumerate(source) if "python3 - <<'PY'" in line) + 1
+          end = next(i for i in range(start, len(source)) if source[i].strip() == 'PY')
+          body = []
+          for line in source[start:end]:
+              body.append(line[10:] if line.startswith('          ') else line)
+          Path('/tmp/google-auth-patch.py').write_text('\n'.join(body) + '\n')
+          PY
+          python3 /tmp/google-auth-patch.py
+          rm -f .github/workflows/google-auth-runner.yml .google-auth-runner-trigger
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: add owner-only Google Sign-In"
+          git push origin HEAD:phase5/google-auth
