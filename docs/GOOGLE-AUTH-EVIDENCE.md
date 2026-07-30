@@ -3,7 +3,7 @@
 - Date: 2026-07-30
 - Supabase project: `sharvaos-live-control-room`
 - Migration: `20260730153049_google_owner_only_auth`
-- Production URL: `https://sharvaos-pulse.vercel.app`
+- Production URL: `https://sharvaos-pulse-google.vercel.app`
 
 ## Repository verification
 

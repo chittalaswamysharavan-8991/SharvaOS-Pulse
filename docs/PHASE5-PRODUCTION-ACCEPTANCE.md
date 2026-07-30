@@ -1,10 +1,10 @@
 # Phase 5 — Production acceptance and governance closure
 
 - Date: 2026-07-30
-- Production URL: `https://sharvaos-pulse.vercel.app`
+- Production URL: `https://sharvaos-pulse-google.vercel.app`
 - Release: `2.2.0`
 - Canonical contract: `sharvaos.pulse.v1`
-- Production source commit: `af1cee26053ce4027bf87e8154473d5edcf04d2d`
+- Production source commit: `748ecee2b36dbf40bd990ac0d3fd4aa6a90d02f2`
 
 ## Goal
 

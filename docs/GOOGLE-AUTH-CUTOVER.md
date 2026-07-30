@@ -22,7 +22,7 @@ Create a Google Cloud OAuth client of type **Web application**.
 Authorized JavaScript origin:
 
 ```text
-https://sharvaos-pulse.vercel.app
+https://sharvaos-pulse-google.vercel.app
 ```
 
 Authorized redirect URI:
@@ -40,8 +40,8 @@ In Supabase Authentication → Providers → Google:
 
 In Supabase Authentication → URL Configuration:
 
-- Site URL: `https://sharvaos-pulse.vercel.app`
-- Redirect allow list: `https://sharvaos-pulse.vercel.app`
+- Site URL: `https://sharvaos-pulse-google.vercel.app`
+- Redirect allow list: `https://sharvaos-pulse-google.vercel.app`
 
 In Supabase Authentication → Hooks:
 
