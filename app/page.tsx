@@ -25,6 +25,9 @@ import {
 } from "../lib/pulse-transport.mjs";
 
 type LogKind = "water" | "smoke" | "food";
+type CaptureKind = "water" | "food" | "sleep" | "expense" | "movement";
+type CaptureStatus = "Draft" | "Sync Pending" | "Writing" | "Verified" | "Partial" | "Failed" | "Needs Review";
+type CaptureRecord = { operationId: string; kind: CaptureKind; status: CaptureStatus; eventTime: string; logicalDate: string; fields: Record<string, string>; destination: string; updatedAt: number; };
 type CardKind = LogKind | "tasks";
 type LogEntry = {
   id: string;
@@ -95,6 +98,11 @@ export default function Home() {
   const [toast, setToast] = useState("");
   const [undoEntry, setUndoEntry] = useState<LogEntry | null>(null);
   const [selectedCard, setSelectedCard] = useState<CardKind | null>(null);
+  const [captureKind, setCaptureKind] = useState<CaptureKind>("water");
+  const [captureFields, setCaptureFields] = useState<Record<string, string>>({ amountMl: "250" });
+  const [captureStatus, setCaptureStatus] = useState<CaptureStatus>("Draft");
+  const [captureMessage, setCaptureMessage] = useState("");
+  const [captureFeed, setCaptureFeed] = useState<CaptureRecord[]>([]);
   const pressTimer = useRef<number | null>(null);
   const longPressed = useRef(false);
   const pendingRef = useRef<PendingOperation[]>([]);
@@ -105,6 +113,15 @@ export default function Home() {
   const date = dayKey();
   const storageKey = `sharvaos-daily-pulse:${date}`;
   const pendingKey = `${storageKey}:pending`;
+  const captureKey = `${storageKey}:notion-captures`;
+
+  const captureDefinitions: Record<CaptureKind, { label: string; destination: string; fields: { key: string; label: string; placeholder: string; type?: string; required?: boolean; options?: string[] }[] }> = {
+    water: { label: "Water", destination: "SharvaOS — Water Log", fields: [{ key: "amountMl", label: "Amount (ml)", placeholder: "250", type: "number" }] },
+    food: { label: "Food", destination: "SharvaOS — Food Log", fields: [{ key: "foodItems", label: "What did you eat?", placeholder: "Rice + aloo curry" }, { key: "mealType", label: "Meal type", placeholder: "Lunch", options: ["Breakfast", "Lunch", "Dinner", "Snack", "Drink", "Other"] }, { key: "quantityOrPortion", label: "Portion (optional)", placeholder: "1 plate", required: false }] },
+    sleep: { label: "Sleep", destination: "SharvaOS — Sleep Log", fields: [{ key: "sleepType", label: "Sleep type", placeholder: "Main Sleep", options: ["Main Sleep", "Nap", "Other"] }, { key: "durationMinutes", label: "Duration (minutes)", placeholder: "480", type: "number" }, { key: "notes", label: "Notes (optional)", placeholder: "Optional", required: false }] },
+    expense: { label: "Expense", destination: "SharvaOS — Daily Spending Log", fields: [{ key: "amountInr", label: "Amount (INR)", placeholder: "0", type: "number" }, { key: "category", label: "Category", placeholder: "Other", options: ["Food", "Smoke", "Travel", "Health", "Shopping", "Bills", "Other"] }, { key: "merchantOrPlace", label: "Merchant/place (optional)", placeholder: "Optional", required: false }, { key: "paymentMethod", label: "Payment method (optional)", placeholder: "Other", options: ["Cash", "UPI", "Card", "Bank Transfer", "Other"], required: false }] },
+    movement: { label: "Movement", destination: "SharvaOS — Body & Movement Log", fields: [{ key: "entryType", label: "Activity", placeholder: "Walk", options: ["Daily Snapshot", "Walk", "Exercise", "Heart Rate", "Weight", "Other"] }, { key: "durationMinutes", label: "Duration (minutes)", placeholder: "20", type: "number" }, { key: "steps", label: "Steps (optional)", placeholder: "Optional", type: "number", required: false }, { key: "notes", label: "Notes (optional)", placeholder: "Optional", required: false }] },
+  };
 
   const savePending = useCallback((operations: PendingOperation[]) => {
     pendingRef.current = operations;
@@ -257,6 +274,8 @@ export default function Home() {
       try {
         const raw = localStorage.getItem(storageKey);
         if (raw) cached = JSON.parse(raw) as DayState;
+        const localCaptures = localStorage.getItem(captureKey);
+        if (localCaptures) setCaptureFeed(JSON.parse(localCaptures) as CaptureRecord[]);
         pending = parsePendingOperations(localStorage.getItem(pendingKey)) as PendingOperation[];
         pendingRef.current = pending;
         if (active && (cached.logs.length || cached.todos.length)) setDay(cached);
@@ -306,7 +325,9 @@ export default function Home() {
     }
     void load();
     return () => { active = false; };
-  }, [date, flushPending, pendingKey, reconcileMissing, requireSignIn, runtimeReady, storageKey, transportVersion]);
+  }, [captureKey, date, flushPending, pendingKey, reconcileMissing, requireSignIn, runtimeReady, storageKey, transportVersion]);
+
+  useEffect(() => { localStorage.setItem(captureKey, JSON.stringify(captureFeed)); }, [captureFeed, captureKey]);
 
   useEffect(() => {
     function retry() { void flushPending(); }
@@ -425,6 +446,47 @@ export default function Home() {
     if (!clean) return;
     addLog({ kind: "food", label: clean, detail: foodType });
     setFoodText("");
+  }
+
+  function setCaptureType(kind: CaptureKind) {
+    setCaptureKind(kind);
+    setCaptureStatus("Draft");
+    setCaptureMessage("");
+    const defaults: Record<CaptureKind, Record<string, string>> = {
+      water: { amountMl: "250" },
+      food: { mealType: "Lunch" },
+      sleep: { sleepType: "Main Sleep", durationMinutes: "480" },
+      expense: { category: "Other" },
+      movement: { entryType: "Walk", durationMinutes: "20" },
+    };
+    setCaptureFields(defaults[kind]);
+  }
+
+  function updateCaptureField(key: string, value: string) { setCaptureFields((current) => ({ ...current, [key]: value })); setCaptureStatus("Draft"); }
+
+  async function submitCapture(event: FormEvent) {
+    event.preventDefault();
+    const definition = captureDefinitions[captureKind];
+    const missing = definition.fields.filter((field) => field.required !== false && !captureFields[field.key]?.trim());
+    if (missing.length) { setCaptureStatus("Needs Review"); setCaptureMessage(`Add ${missing.map((field) => field.label.toLowerCase()).join(" and ")} before saving.`); return; }
+    const operationId = uid();
+    const eventTime = new Date().toISOString();
+    const numericFields = new Set(["amountMl", "durationMinutes", "amountInr", "steps", "distanceKm", "caloriesKcal", "averageHr"]);
+    const fields = Object.fromEntries(Object.entries(captureFields).filter(([, value]) => value.trim() !== "").map(([key, value]) => [key, numericFields.has(key) ? Number(value) : value]));
+    const record: CaptureRecord = { operationId, kind: captureKind, status: "Sync Pending", eventTime, logicalDate: date, fields: Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, String(value)])), destination: definition.destination, updatedAt: Date.now() };
+    setCaptureFeed((items) => [record, ...items.filter((item) => item.operationId !== operationId)]);
+    setCaptureStatus("Sync Pending"); setCaptureMessage("Queued locally. Waiting for the capture service…");
+    try {
+      setCaptureStatus("Writing");
+      const accessToken = await authClientRef.current?.getAccessToken();
+      if (!accessToken) throw new Error("Sign in required");
+      const response = await fetch("/api/notion-capture", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ operationId, eventTime, logicalDate: date, eventTimeBasis: "CAPTURE_TIME", captureType: captureKind, fields }) });
+      const result = await response.json().catch(() => ({})) as { status?: CaptureStatus; verified?: boolean; message?: string };
+      const verified = response.ok && result.verified === true && result.status === "Verified";
+      const nextStatus: CaptureStatus = verified ? "Verified" : response.ok ? (result.status === "Partial" ? "Partial" : "Needs Review") : "Failed";
+      setCaptureStatus(nextStatus); setCaptureMessage(result.message || (verified ? "Verified in the configured destination." : "The service did not verify this capture. Nothing is reported as saved."));
+      setCaptureFeed((items) => items.map((item) => item.operationId === operationId ? { ...item, status: nextStatus, updatedAt: Date.now() } : item));
+    } catch { setCaptureStatus("Failed"); setCaptureMessage("Could not reach the capture service. The local submission remains visible for review."); setCaptureFeed((items) => items.map((item) => item.operationId === operationId ? { ...item, status: "Failed", updatedAt: Date.now() } : item)); }
   }
   function addTodo(event: FormEvent) {
     event.preventDefault();
@@ -600,7 +662,21 @@ export default function Home() {
       </section>
 
       <div className="content-grid">
-        <section className="panel capture-panel">
+        <section className="panel capture-panel single-capture" aria-labelledby="capture-heading">
+          <div className="panel-heading"><div><p className="eyebrow">SINGLE-INTERFACE CAPTURE</p><h3 id="capture-heading">What happened?</h3></div><span className={`capture-state ${captureStatus.toLowerCase().replace(/ /g, "-")}`}>{captureStatus}</span></div>
+          <div className="capture-tabs capture-tabs-wide" role="tablist" aria-label="Capture type">
+            {(Object.keys(captureDefinitions) as CaptureKind[]).map((kind) => <button key={kind} role="tab" aria-selected={captureKind === kind} className={captureKind === kind ? "active" : ""} onClick={() => setCaptureType(kind)}>{captureDefinitions[kind].label}</button>)}
+          </div>
+          <form className="capture-form" onSubmit={submitCapture}>
+            <div className="capture-context"><span>Now · {todayLabel()}</span><span>Local time: {currentTime()}</span></div>
+            <div className="capture-fields">{captureDefinitions[captureKind].fields.map((field) => <label key={field.key}>{field.label}{field.options ? <select required={field.required !== false} value={captureFields[field.key] || field.options[0]} onChange={(event) => updateCaptureField(field.key, event.target.value)}>{field.options.map((option) => <option key={option} value={option}>{option}</option>)}</select> : <input required={field.required !== false} type={field.type || "text"} value={captureFields[field.key] || ""} onChange={(event) => updateCaptureField(field.key, event.target.value)} placeholder={field.placeholder} />}</label>)}</div>
+            <div className="destination-preview"><span>Exact destination</span><strong>{captureDefinitions[captureKind].destination}</strong><small>Only this capture type and its fields will be sent.</small></div>
+            <div className="capture-actions"><button className="primary-action capture-submit" type="submit">Save capture</button><span className="privacy-note">Smoking is privacy-gated and unavailable here. Schema-unavailable tasks stay in Needs Review.</span></div>
+            {captureMessage && <p className={`capture-message ${captureStatus.toLowerCase().replace(/ /g, "-")}`} role="status">{captureMessage}</p>}
+          </form>
+        </section>
+
+        <section className="panel capture-panel legacy-capture">
           <div className="panel-heading"><div><p className="eyebrow">QUICK CAPTURE</p><h3>What happened?</h3></div><span className="live-pill"><i /> ready</span></div>
           <div className="capture-tabs" role="tablist">
             {(["water", "smoke", "food"] as LogKind[]).map((kind) => (
@@ -626,6 +702,8 @@ export default function Home() {
           {!!day.todos.length && <div className="todo-footer"><div><i style={{ width: `${progress}%` }} /></div><span>{completedTodos} complete</span></div>}
         </section>
       </div>
+
+      <section className="panel feed-panel" aria-labelledby="feed-heading"><div className="panel-heading"><div><p className="eyebrow">LOCAL PROJECTION</p><h3 id="feed-heading">Today Feed</h3></div><span className="timeline-total">{captureFeed.length} captures</span></div><p className="feed-note">Submitted and verified state on this device. This is not a Notion database.</p><div className="capture-feed">{!captureFeed.length && <span className="sheet-empty">No captures submitted yet.</span>}{captureFeed.slice(0, 8).map((item) => <article className="feed-item" key={item.operationId}><div><strong>{captureDefinitions[item.kind].label}</strong><span>{Object.values(item.fields).filter(Boolean).join(" · ")}</span></div><time>{currentTime(new Date(item.eventTime).getTime())}</time><b className={`capture-state ${item.status.toLowerCase().replace(/ /g, "-")}`}>{item.status}</b></article>)}</div></section>
 
       <section className="panel timeline-panel">
         <div className="panel-heading"><div><p className="eyebrow">TODAY&apos;S TRACE</p><h3>Your day, as it happened.</h3></div><span className="timeline-total">{day.logs.length} entries</span></div>
