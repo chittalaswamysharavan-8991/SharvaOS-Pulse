@@ -37,15 +37,17 @@ jobs:
         env:
           SOURCE_COMMIT: ${{ github.sha }}
         run: |
-          mkdir -p deploy-source/app/api/health deploy-source/app/api/runtime-config deploy-source/lib deploy-source/public
+          mkdir -p deploy-source/app/api/health deploy-source/app/api/runtime-config deploy-source/app/api/notion-capture deploy-source/lib deploy-source/public
           cp app/page.tsx app/layout.tsx app/globals.css deploy-source/app/
           cp app/api/runtime-config/route.ts deploy-source/app/api/runtime-config/route.ts
+          cp app/api/notion-capture/route.ts deploy-source/app/api/notion-capture/route.ts
           cp lib/pulse-auth-client.mjs lib/pulse-auth-client.d.mts deploy-source/lib/
           cp lib/pulse-canonical-client.mjs lib/pulse-canonical-client.d.mts deploy-source/lib/
           cp lib/pulse-runtime-config.mjs lib/pulse-runtime-config.d.mts deploy-source/lib/
           cp lib/pulse-transport.mjs lib/pulse-transport.d.mts deploy-source/lib/
           cp lib/pulse-reliability.mjs lib/pulse-reliability.d.mts deploy-source/lib/
           cp lib/pulse-public-runtime.mjs lib/pulse-public-runtime.d.mts deploy-source/lib/
+          cp lib/notion-capture.mjs deploy-source/lib/
           cp public/favicon.svg deploy-source/public/favicon.svg
           cat > deploy-source/app/api/health/route.ts <<EOF
           import { NextResponse } from "next/server";
