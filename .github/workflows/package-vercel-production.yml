@@ -45,7 +45,21 @@ jobs:
           export { default } from "../pulse-client";
           PULSEEOF
           cp app/layout.tsx app/globals.css deploy-source/app/
-          cp app/api/runtime-config/route.ts deploy-source/app/api/runtime-config/route.ts
+          cat > deploy-source/app/api/runtime-config/route.ts <<'RUNTIMEEOF'
+          import { resolvePulseRuntimeValues } from "../../../lib/pulse-public-runtime.mjs";
+
+          export const runtime = "edge";
+
+          export async function GET() {
+            const config = resolvePulseRuntimeValues(process.env);
+            return Response.json(config, {
+              headers: {
+                "cache-control": "no-store, max-age=0",
+                "x-content-type-options": "nosniff",
+              },
+            });
+          }
+          RUNTIMEEOF
           cp lib/pulse-auth-client.mjs lib/pulse-auth-client.d.mts deploy-source/lib/
           cp lib/pulse-canonical-client.mjs lib/pulse-canonical-client.d.mts deploy-source/lib/
           cp lib/pulse-runtime-config.mjs lib/pulse-runtime-config.d.mts deploy-source/lib/
