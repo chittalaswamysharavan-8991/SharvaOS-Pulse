@@ -106,10 +106,10 @@ export default function SharvaOSToday() {
     const client = readRef.current;
     if (!client) return;
     let active = true;
-    async function load() {
+    async function load(activeClient: ReadClient) {
       setMessage("");
       try {
-        const next = await client.readToday();
+        const next = await activeClient.readToday();
         if (!active) return;
         setModel(next);
         setPhase("ready");
@@ -124,7 +124,7 @@ export default function SharvaOSToday() {
         setPhase("error");
       }
     }
-    void load();
+    void load(client);
     return () => { active = false; };
   }, [phase, refreshKey, requireSignIn]);
 
