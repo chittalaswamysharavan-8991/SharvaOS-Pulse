@@ -37,8 +37,14 @@ jobs:
         env:
           SOURCE_COMMIT: ${{ github.sha }}
         run: |
-          mkdir -p deploy-source/app/api/health deploy-source/app/api/runtime-config deploy-source/lib deploy-source/public
-          cp app/page.tsx app/layout.tsx app/globals.css deploy-source/app/
+          mkdir -p deploy-source/app/api/health deploy-source/app/api/runtime-config deploy-source/app/pulse deploy-source/lib deploy-source/public
+          sed -e 's#../../lib/#../lib/#g' -e 's#`${window.location.origin}/today`#window.location.origin#g' app/today/page.tsx > deploy-source/app/page.tsx
+          cp app/today/today.module.css deploy-source/app/today.module.css
+          cp app/page.tsx deploy-source/app/pulse-client.tsx
+          cat > deploy-source/app/pulse/page.tsx <<'PULSEEOF'
+          export { default } from "../pulse-client";
+          PULSEEOF
+          cp app/layout.tsx app/globals.css deploy-source/app/
           cp app/api/runtime-config/route.ts deploy-source/app/api/runtime-config/route.ts
           cp lib/pulse-auth-client.mjs lib/pulse-auth-client.d.mts deploy-source/lib/
           cp lib/pulse-canonical-client.mjs lib/pulse-canonical-client.d.mts deploy-source/lib/
@@ -46,8 +52,9 @@ jobs:
           cp lib/pulse-transport.mjs lib/pulse-transport.d.mts deploy-source/lib/
           cp lib/pulse-reliability.mjs lib/pulse-reliability.d.mts deploy-source/lib/
           cp lib/pulse-public-runtime.mjs lib/pulse-public-runtime.d.mts deploy-source/lib/
+          cp lib/sharvaos-read-model.mjs lib/sharvaos-read-model.d.mts deploy-source/lib/
           cp public/favicon.svg deploy-source/public/favicon.svg
-          cat > deploy-source/app/api/health/route.ts <<EOF
+          cat > deploy-source/app/api/health/route.ts <<HEALTHEOF
           import { NextResponse } from "next/server";
           import { resolvePulseRuntimeValues } from "../../../lib/pulse-public-runtime.mjs";
 
@@ -64,8 +71,9 @@ jobs:
                 : "blocked";
             return NextResponse.json({
               status: ready ? "ready" : "blocked",
-              version: "2.2.0",
+              version: "2.3.0",
               contract: "sharvaos.pulse.v1",
+              surface: "sharvaos.today.front-door.v1",
               requestedOwner: runtime.requestedOwner,
               dataOwner: runtime.dataOwner,
               configSource: runtime.configSource,
@@ -79,11 +87,11 @@ jobs:
               headers: { "cache-control": "no-store, max-age=0", "x-content-type-options": "nosniff" },
             });
           }
-          EOF
-          cat > deploy-source/package.json <<'EOF'
+          HEALTHEOF
+          cat > deploy-source/package.json <<'PKGEOF'
           {
             "name": "sharvaos-pulse-google",
-            "version": "2.2.0",
+            "version": "2.3.0",
             "private": true,
             "scripts": { "build": "next build" },
             "dependencies": {
@@ -100,8 +108,8 @@ jobs:
               "typescript": "5.9.3"
             }
           }
-          EOF
-          cat > deploy-source/tsconfig.json <<'EOF'
+          PKGEOF
+          cat > deploy-source/tsconfig.json <<'TSEOF'
           {
             "compilerOptions": {
               "target": "ES2017",
@@ -119,17 +127,17 @@ jobs:
               "incremental": true,
               "plugins": [{ "name": "next" }]
             },
-            "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+            "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", "**/*.d.mts", ".next/types/**/*.ts"],
             "exclude": ["node_modules"]
           }
-          EOF
-          cat > deploy-source/postcss.config.mjs <<'EOF'
+          TSEOF
+          cat > deploy-source/postcss.config.mjs <<'POSTCSSEOF'
           export default { plugins: { "@tailwindcss/postcss": {} } };
-          EOF
-          cat > deploy-source/next-env.d.ts <<'EOF'
+          POSTCSSEOF
+          cat > deploy-source/next-env.d.ts <<'NEXTENVEOF'
           /// <reference types="next" />
           /// <reference types="next/image-types/global" />
-          EOF
+          NEXTENVEOF
 
       - name: Verify production package builds
         working-directory: deploy-source
