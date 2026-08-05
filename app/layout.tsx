@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SharvaOS Daily Pulse",
-  description: "A focused daily dashboard for water, smoke, food, and today's tasks.",
+  title: "SharvaOS Today",
+  description: "The single SharvaOS front door for canonical priorities, projects, systems, and Daily Pulse.",
   other: {
     "codex-preview": "development",
   },
